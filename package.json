@@ -1,0 +1,37 @@
+{
+  "name": "hr-learning-scheduler",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm run build && wrangler pages dev dist",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.worker.json --noEmit && tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.tools.json --noEmit",
+    "test": "vitest run",
+    "wrangler:types": "wrangler types --include-runtime false",
+    "wrangler:check": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrations:list": "wrangler d1 migrations list DB --local",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name hr-system"
+  },
+  "dependencies": {
+    "preact": "latest"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "latest",
+    "@cloudflare/workers-types": "5.20260721.1",
+    "@preact/preset-vite": "latest",
+    "@types/babel__core": "7.20.5",
+    "@types/node": "26.1.1",
+    "typescript": "5.8.3",
+    "vite": "latest",
+    "vitest": "latest",
+    "wrangler": "latest"
+  },
+  "overrides": {
+    "sharp": "0.35.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
