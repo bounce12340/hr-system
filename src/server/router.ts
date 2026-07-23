@@ -8,6 +8,7 @@ import {
   requireUser,
 } from "./http";
 import { handleAdminM1, handleEmployeeM1 } from "./m1";
+import { handleAdminM2, handleEmployeeM2 } from "./m2";
 import type { ApiContext } from "./types";
 
 function corsPreflight(request: Request): Response {
@@ -61,10 +62,14 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       requireAdmin(user);
       const response = await handleAdminM1(context, path);
       if (response) return response;
+      const m2Response = await handleAdminM2(context, path);
+      if (m2Response) return m2Response;
     }
     if (path.startsWith("/api/employee/")) {
       const response = await handleEmployeeM1(context, path);
       if (response) return response;
+      const m2Response = await handleEmployeeM2(context, path);
+      if (m2Response) return m2Response;
     }
 
     throw new ApiError(404, "找不到此 API。");

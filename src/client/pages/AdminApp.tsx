@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { api, ApiClientError, jsonBody } from "../api";
 import { MonthCalendar } from "../components/Calendar";
+import {
+  AdminDashboard,
+  CertificationsPage,
+  EnrollmentApprovalPage,
+  MandatoryTrainingPage,
+  TestsPage,
+  TrainingMatrixPage,
+} from "./M2AdminPages";
 import type {
   AssignmentEmployee,
   CompletionEmployee,
@@ -10,7 +18,18 @@ import type {
   User,
 } from "../types";
 
-type AdminTab = "calendar" | "courses" | "attendance" | "completion" | "special-days";
+type AdminTab =
+  | "dashboard"
+  | "calendar"
+  | "courses"
+  | "attendance"
+  | "completion"
+  | "mandatory-training"
+  | "enrollment-approval"
+  | "tests"
+  | "certifications"
+  | "training-matrix"
+  | "special-days";
 
 const LEVEL_LABEL = ["", "低", "中", "高"];
 const todayMonth = () => new Date().toISOString().slice(0, 7);
@@ -33,12 +52,18 @@ interface AdminAppProps {
 }
 
 export function AdminApp({ user, onLogout }: AdminAppProps) {
-  const [tab, setTab] = useState<AdminTab>("calendar");
+  const [tab, setTab] = useState<AdminTab>("dashboard");
   const tabs: Array<{ id: AdminTab; label: string }> = [
+    { id: "dashboard", label: "管理儀表板" },
     { id: "calendar", label: "排課月曆" },
     { id: "courses", label: "課程管理" },
     { id: "attendance", label: "出席登錄" },
     { id: "completion", label: "完訓追蹤" },
+    { id: "mandatory-training", label: "必修訓練清單" },
+    { id: "enrollment-approval", label: "報名審核" },
+    { id: "tests", label: "測驗紀錄" },
+    { id: "certifications", label: "證照管理" },
+    { id: "training-matrix", label: "訓練矩陣" },
     { id: "special-days", label: "重要日子" },
   ];
   return (
@@ -65,10 +90,16 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
             {tabs.map((item) => <option value={item.id}>{item.label}</option>)}
           </select>
         </header>
+        {tab === "dashboard" && <AdminDashboard />}
         {tab === "calendar" && <AdminCalendar />}
         {tab === "courses" && <CourseManagement />}
         {tab === "attendance" && <AttendancePage />}
         {tab === "completion" && <CompletionPage />}
+        {tab === "mandatory-training" && <MandatoryTrainingPage />}
+        {tab === "enrollment-approval" && <EnrollmentApprovalPage />}
+        {tab === "tests" && <TestsPage />}
+        {tab === "certifications" && <CertificationsPage />}
+        {tab === "training-matrix" && <TrainingMatrixPage />}
         {tab === "special-days" && <SpecialDaysPage />}
       </main>
     </div>

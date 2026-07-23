@@ -2,22 +2,25 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { api } from "../api";
 import { MonthCalendar } from "../components/Calendar";
 import type { CourseSession, User } from "../types";
+import { EmployeeHome, MyCertifications } from "./M2EmployeePages";
 
-type EmployeeTab = "schedule" | "enroll" | "records";
+type EmployeeTab = "home" | "schedule" | "enroll" | "records" | "certifications";
 const todayMonth = () => new Date().toISOString().slice(0, 7);
 function shiftMonth(month: string, delta: number) { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() + delta); return date.toISOString().slice(0, 7); }
 
 interface EmployeeAppProps { user: User; onLogout: () => void }
 
 export function EmployeeApp({ user, onLogout }: EmployeeAppProps) {
-  const [tab, setTab] = useState<EmployeeTab>("schedule");
-  const tabs: Array<{ id: EmployeeTab; label: string }> = [{ id: "schedule", label: "我的課表" }, { id: "enroll", label: "課程報名" }, { id: "records", label: "我的訓練紀錄" }];
+  const [tab, setTab] = useState<EmployeeTab>("home");
+  const tabs: Array<{ id: EmployeeTab; label: string }> = [{ id: "home", label: "首頁" }, { id: "schedule", label: "我的課表" }, { id: "enroll", label: "課程報名" }, { id: "records", label: "我的訓練紀錄" }, { id: "certifications", label: "我的證照" }];
   return <div class="employee-shell">
     <header class="employee-header"><div class="sidebar-brand"><span>UI</span><strong>HR Learning</strong></div><nav>{tabs.map((item) => <button class={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav><div><strong>{user.employeeName}</strong><small>{user.department}</small><button class="text-button" onClick={onLogout}>登出</button></div></header>
     <main class="employee-workspace">
+      {tab === "home" && <EmployeeHome user={user} />}
       {tab === "schedule" && <MySchedule />}
       {tab === "enroll" && <CourseEnrollment />}
       {tab === "records" && <MyRecords />}
+      {tab === "certifications" && <MyCertifications />}
     </main>
   </div>;
 }
@@ -34,16 +37,17 @@ function MySchedule() {
   </section>;
 }
 
-interface OpenSession extends CourseSession { description: string; durationHours: number; instructor: string; alreadyEnrolled: number }
+interface OpenSession extends CourseSession { description: string; durationHours: number; instructor: string; alreadyEnrolled: number; registrationStatus: "enrolled" | "waitlisted" | null }
 function CourseEnrollment() {
   const [sessions, setSessions] = useState<OpenSession[]>([]);
+  const [requiresApproval, setRequiresApproval] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  async function load() { try { setSessions((await api<{ sessions: OpenSession[] }>("/api/employee/courses/open")).sessions); } catch (caught) { setError(caught instanceof Error ? caught.message : "讀取失敗。"); } }
+  async function load() { try { const data = await api<{ sessions: OpenSession[]; requiresApproval: boolean }>("/api/employee/courses/open"); setSessions(data.sessions); setRequiresApproval(data.requiresApproval); } catch (caught) { setError(caught instanceof Error ? caught.message : "讀取失敗。"); } }
   useEffect(() => { void load(); }, []);
-  async function enroll(id: string) { setError(""); setMessage(""); try { await api(`/api/employee/course-sessions/${id}/enroll`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); setMessage("報名成功，場次已加入我的課表。"); await load(); } catch (caught) { setError(caught instanceof Error ? caught.message : "報名失敗。"); } }
-  return <section><div class="page-heading"><div><p class="eyebrow">OPEN COURSES</p><h1>課程報名</h1><p>選修課名額內依報名順序錄取。</p></div></div>{message && <div class="alert success">{message}</div>}{error && <div class="alert error">{error}</div>}
-    <div class="course-grid">{sessions.map((session) => <article class="course-card"><div><span class={`level-badge level-${session.competencyLevel}`}>{["", "低", "中", "高"][session.competencyLevel]}</span><span class="status">選修</span></div><h2>{session.courseName}</h2><p>{session.description}</p><dl><div><dt>日期</dt><dd>{session.sessionDate}</dd></div><div><dt>時間</dt><dd>{session.startTime}–{session.endTime}</dd></div><div><dt>地點</dt><dd>{session.location}</dd></div><div><dt>名額</dt><dd>{session.enrolledCount}/{session.capacity}</dd></div></dl><button class="primary" disabled={session.alreadyEnrolled === 1 || session.enrolledCount >= session.capacity} onClick={() => void enroll(session.id)}>{session.alreadyEnrolled === 1 ? "已報名" : session.enrolledCount >= session.capacity ? "已額滿" : "立即報名"}</button></article>)}</div>
+  async function enroll(id: string) { setError(""); setMessage(""); try { const result = await api<{ status: "approved" | "pending" }>(`/api/employee/course-sessions/${id}/enroll`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); setMessage(result.status === "pending" ? "報名已送出，請等候 HR 審核。" : "報名成功，場次已加入我的課表。"); await load(); } catch (caught) { setError(caught instanceof Error ? caught.message : "報名失敗。"); } }
+  return <section><div class="page-heading"><div><p class="eyebrow">OPEN COURSES</p><h1>課程報名</h1><p>{requiresApproval ? "目前採 HR 審核制；核准後才會加入課表。" : "目前採直接核准；名額內依報名順序錄取。"}</p></div><span class={`status ${requiresApproval ? "warning" : "ok"}`}>{requiresApproval ? "需 HR 審核" : "直接核准"}</span></div>{message && <div class="alert success">{message}</div>}{error && <div class="alert error">{error}</div>}
+    <div class="course-grid">{sessions.map((session) => <article class="course-card"><div><span class={`level-badge level-${session.competencyLevel}`}>{["", "低", "中", "高"][session.competencyLevel]}</span><span class="status">選修</span></div><h2>{session.courseName}</h2><p>{session.description}</p><dl><div><dt>日期</dt><dd>{session.sessionDate}</dd></div><div><dt>時間</dt><dd>{session.startTime}–{session.endTime}</dd></div><div><dt>地點</dt><dd>{session.location}</dd></div><div><dt>名額</dt><dd>{session.enrolledCount}/{session.capacity}</dd></div></dl><button class="primary" disabled={session.alreadyEnrolled === 1 || (!requiresApproval && session.enrolledCount >= session.capacity)} onClick={() => void enroll(session.id)}>{session.registrationStatus === "waitlisted" ? "審核中" : session.registrationStatus === "enrolled" ? "已報名" : !requiresApproval && session.enrolledCount >= session.capacity ? "已額滿" : "立即報名"}</button></article>)}</div>
   </section>;
 }
 

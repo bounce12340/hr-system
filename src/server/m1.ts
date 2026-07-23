@@ -8,6 +8,7 @@ import {
   uuid,
 } from "./http";
 import type { ApiContext, AuthUser } from "./types";
+import { enrollmentRequiresApproval } from "./m2";
 
 interface CourseRow {
   id: string;
@@ -892,13 +893,17 @@ async function employeeSchedule(context: ApiContext, user: AuthUser & { employee
 }
 
 async function openElectives(context: ApiContext, user: AuthUser & { employeeId: string }): Promise<Response> {
-  const result = await context.env.DB.prepare(`
+  const [result, requiresApproval] = await Promise.all([
+    context.env.DB.prepare(`
     SELECT cs.id, c.id AS courseId, c.name AS courseName, c.description,
            c.competency_level AS competencyLevel, c.duration_hours AS durationHours,
            c.instructor, cs.session_date AS sessionDate, cs.start_time AS startTime,
            cs.end_time AS endTime, cs.location, cs.capacity,
            COUNT(CASE WHEN all_en.enrollment_status = 'enrolled' THEN 1 END) AS enrolledCount,
-           MAX(CASE WHEN mine.employee_id IS NOT NULL AND mine.enrollment_status = 'enrolled' THEN 1 ELSE 0 END) AS alreadyEnrolled
+           MAX(CASE WHEN mine.employee_id IS NOT NULL
+             AND mine.enrollment_status IN ('enrolled', 'waitlisted') THEN 1 ELSE 0 END) AS alreadyEnrolled,
+           MAX(CASE WHEN mine.enrollment_status IN ('enrolled', 'waitlisted')
+             THEN mine.enrollment_status ELSE NULL END) AS registrationStatus
     FROM course_sessions cs
     JOIN courses c ON c.id = cs.course_id
     LEFT JOIN enrollments all_en ON all_en.course_session_id = cs.id
@@ -906,25 +911,30 @@ async function openElectives(context: ApiContext, user: AuthUser & { employeeId:
     WHERE c.course_type = 'elective' AND c.enrollment_open = 1 AND c.active = 1
       AND cs.status = 'scheduled' AND cs.session_date >= date('now')
     GROUP BY cs.id ORDER BY cs.session_date, cs.start_time
-  `).bind(user.employeeId).all();
-  return json({ sessions: result.results });
+  `).bind(user.employeeId).all(),
+    enrollmentRequiresApproval(context.env.DB),
+  ]);
+  return json({ sessions: result.results, requiresApproval });
 }
 
 async function enrollSelf(context: ApiContext, user: AuthUser & { employeeId: string }, id: string): Promise<Response> {
   const enrollmentId = uuid();
+  const requiresApproval = await enrollmentRequiresApproval(context.env.DB);
+  const targetStatus = requiresApproval ? "waitlisted" : "enrolled";
   try {
     const result = await context.env.DB.prepare(`
-      INSERT INTO enrollments (id, course_session_id, employee_id, source)
-      SELECT ?, cs.id, ?, 'self'
+      INSERT INTO enrollments (id, course_session_id, employee_id, source, enrollment_status)
+      SELECT ?, cs.id, ?, 'self', ?
       FROM course_sessions cs JOIN courses c ON c.id = cs.course_id
       WHERE cs.id = ? AND cs.status = 'scheduled' AND cs.session_date >= date('now')
         AND c.active = 1 AND c.course_type = 'elective' AND c.enrollment_open = 1
-        AND (SELECT COUNT(*) FROM enrollments en
-             WHERE en.course_session_id = cs.id AND en.enrollment_status = 'enrolled') < cs.capacity
+        AND (? = 'waitlisted' OR
+          (SELECT COUNT(*) FROM enrollments en
+           WHERE en.course_session_id = cs.id AND en.enrollment_status = 'enrolled') < cs.capacity)
         AND NOT EXISTS (
           SELECT 1 FROM enrollments existing
           WHERE existing.course_session_id = cs.id AND existing.employee_id = ?
-            AND existing.enrollment_status = 'enrolled'
+            AND existing.enrollment_status IN ('enrolled', 'waitlisted')
         )
         AND NOT EXISTS (
           SELECT 1 FROM enrollments en2
@@ -933,8 +943,27 @@ async function enrollSelf(context: ApiContext, user: AuthUser & { employeeId: st
             AND other.status <> 'cancelled' AND other.session_date = cs.session_date
             AND other.start_time < cs.end_time AND other.end_time > cs.start_time
         )
-    `).bind(enrollmentId, user.employeeId, id, user.employeeId, user.employeeId).run();
-    if (result.meta.changes === 1) return json({ enrollmentId }, 201);
+      ON CONFLICT(course_session_id, employee_id) DO UPDATE SET
+        source = 'self', enrollment_status = excluded.enrollment_status,
+        assigned_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        reviewed_by = NULL, reviewed_at = NULL, review_note = ''
+      WHERE enrollments.enrollment_status = 'cancelled'
+    `).bind(
+      enrollmentId,
+      user.employeeId,
+      targetStatus,
+      id,
+      targetStatus,
+      user.employeeId,
+      user.employeeId,
+    ).run();
+    if (result.meta.changes === 1) {
+      return json({
+        enrollmentId,
+        status: requiresApproval ? "pending" : "approved",
+        enrollmentStatus: targetStatus,
+      }, 201);
+    }
   } catch {
     // The diagnostic below returns a stable, user-friendly conflict instead of a raw constraint error.
   }
@@ -946,7 +975,7 @@ async function enrollSelf(context: ApiContext, user: AuthUser & { employeeId: st
             WHERE en.course_session_id = cs.id AND en.enrollment_status = 'enrolled') AS enrolledCount,
            (SELECT COUNT(*) FROM enrollments mine
             WHERE mine.course_session_id = cs.id AND mine.employee_id = ?
-              AND mine.enrollment_status = 'enrolled') AS mine
+              AND mine.enrollment_status IN ('enrolled', 'waitlisted')) AS mine
     FROM course_sessions cs JOIN courses c ON c.id = cs.course_id WHERE cs.id = ?
   `).bind(user.employeeId, id).first<{
     id: string;
@@ -959,8 +988,10 @@ async function enrollSelf(context: ApiContext, user: AuthUser & { employeeId: st
     mine: number;
   }>();
   if (!session) throw new ApiError(404, "找不到指定場次。");
-  if (session.mine > 0) throw new ApiError(409, "您已報名此場次。");
-  if (session.enrolledCount >= session.capacity) throw new ApiError(409, "此場次名額已滿。");
+  if (session.mine > 0) throw new ApiError(409, "您已報名或正在等候審核。");
+  if (!requiresApproval && session.enrolledCount >= session.capacity) {
+    throw new ApiError(409, "此場次名額已滿。");
+  }
   if (session.courseType !== "elective" || session.enrollmentOpen !== 1) {
     throw new ApiError(403, "此課程未開放員工自行報名。");
   }
@@ -975,7 +1006,7 @@ async function cancelSelfEnrollment(
   const result = await context.env.DB.prepare(`
     UPDATE enrollments SET enrollment_status = 'cancelled'
     WHERE course_session_id = ? AND employee_id = ? AND source = 'self'
-      AND attendance_status = 'pending' AND enrollment_status = 'enrolled'
+      AND attendance_status = 'pending' AND enrollment_status IN ('enrolled', 'waitlisted')
   `).bind(id, user.employeeId).run();
   if (result.meta.changes === 0) throw new ApiError(409, "此報名無法取消或不存在。");
   return json({ cancelled: true });
