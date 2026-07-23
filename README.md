@@ -2,7 +2,7 @@
 
 Cloudflare Pages 靜態 SPA（Preact + Vite）與 Pages Functions REST API，資料儲存在 Cloudflare D1。全站介面為繁體中文，時區固定為 `Asia/Taipei`。
 
-目前依開發順序只完成 Step 1～3 前段：repo／Wrangler／全部 schema 與 seed、Auth／RBAC、M1 學習排課。M2～M5 只有規格要求的資料表，尚未建立應用路由或頁面。
+目前依開發順序完成 Step 1～3 的 repo／Wrangler／schema 與 seed、Auth／RBAC、M1 學習排課與 M2 教育訓練／證照管理。M3～M5 仍只有既有 schema，尚未建立應用路由或頁面。
 
 ## 快速開始
 
@@ -83,11 +83,22 @@ npm run db:migrate:local       # 套用本機 D1 migration
 - mutation 檢查 `Origin` 並限定 JSON body；錯誤訊息不回傳 stack trace。
 - 薪資欄位存在 `employees` schema，但本階段沒有任何 employee API 會查詢或回傳薪資。
 
+## M2 功能
+
+- 必修訓練清單：依 D1 的 `job_types.required_level` 累進推導每位員工的必修課，逐課顯示完成／未完成及整體完成率，可依部門篩選。
+- 選修報名流程：`settings.elective_enrollment_requires_approval` 可切換直接核准或 HR 審核；審核模式使用 `waitlisted` 狀態，核准時重新檢查名額與時段衝突，並保留審核人、時間、備註與 audit log。
+- 測驗紀錄：測驗關聯開課場次，可維護通過門檻並批次登錄參訓員工分數；低於門檻會自動標記不通過與需補訓。
+- 證照管理：證照類型與員工證照 CRUD，包含名稱、發證單位、證號、取得日、到期日與備註。
+- 到期提醒：`settings.certification_reminder_days` 預設 60 天；admin 管理儀表板與該員工首頁使用相同提醒規則，逾期項目也會持續顯示。
+- 職務別訓練矩陣：職務類型 × 必修課交叉表，依在職員工完成數計算每格百分比；綠燈 ≥ 80%、黃燈 ≥ 50%、紅燈 < 50%，非該職務必修顯示 `—`。
+- 員工端：首頁顯示自己的證照提醒、必修逐課狀態與近期場次數；另有完整證照清單與報名審核狀態。
+
 ## Migration 與 seed
 
 - `0001_initial_schema.sql`：33 張業務表，涵蓋規格列出的 M1～M5 完整資料模型。
 - `0002_indexes.sql`：查詢索引與 `updated_at` triggers。
 - `0003_seed.sql`：15 位員工、3 種職務類型、9 門課、6 場次、封鎖／全員必訓日、2 職缺、4 候選人與到期證照。
+- `0004_m2_enrollment_review.sql`：選修報名審核人、時間、備註欄位與待審佇列索引。
 
 場次與提醒日期使用 `date('now', '+N day')`，確保每次新環境套 seed 時仍落在未來一個月。
 
@@ -98,9 +109,12 @@ npm run db:migrate:local       # 套用本機 D1 migration
 - 場次指派人數超過名額時阻擋；HR 必須提高名額或縮減名單。
 - 選修報名以單一條件式 `INSERT ... SELECT` 同時檢查開放狀態、名額、重複報名與時段衝突。
 - 必修完成率以「目前有效的必修課程」對「員工曾完成的 distinct 課程」計算；重訓不重複增加分子。
+- 選修報名設定預設直接核准；切為審核制後，新申請先進 `waitlisted`，不先占用正式名額，核准時再檢查容量與衝突。
+- 證照到期提醒含「已逾期」與未來 N 天內到期資料；無到期日的永久證照不產生提醒。
+- 訓練矩陣只列必修課，紅／黃／綠門檻採 `<50%`、`50–79%`、`≥80%`。
 - 日期存 `YYYY-MM-DD`、時間存 `HH:mm`、事件 timestamp 存 ISO 8601 UTC；畫面業務語意一律採 Asia/Taipei。
 - `tsconfig.test.json` 僅對 Cloudflare Vitest 第三方宣告檔啟用 `skipLibCheck`，應用端與 Worker 端維持完整 strict typecheck。
 
 ## 尚未開始
 
-M2 訓練證照、M3 招募、M4 報表、M5 人才盤點的功能、路由與頁面均未開始；需等待下一階段明確確認。
+M3 招募、M4 報表、M5 人才盤點的功能、路由與頁面均未開始；需等待下一階段明確確認。

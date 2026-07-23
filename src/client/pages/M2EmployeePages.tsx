@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { api } from "../api";
+import { CertificationReminderList, expiryText } from "../components/CertificationReminderList";
 import type {
   CertificationReminder,
   MandatoryTrainingEmployee,
@@ -8,12 +9,6 @@ import type {
 } from "../types";
 
 const LEVEL_LABEL = ["", "低", "中", "高"];
-
-function expiryText(days: number): string {
-  if (days < 0) return `已逾期 ${Math.abs(days)} 天`;
-  if (days === 0) return "今天到期";
-  return `${days} 天後到期`;
-}
 
 export function EmployeeHome({ user }: { user: User }) {
   const [data, setData] = useState<{
@@ -42,14 +37,11 @@ export function EmployeeHome({ user }: { user: User }) {
     <div class="home-grid">
       <div class="panel">
         <div class="panel-heading"><div><h2>我的證照提醒</h2><small>提前 {data?.settings.certificationReminderDays ?? 60} 天顯示</small></div></div>
-        <div class="reminder-list">
-          {data?.certificationReminders.map((reminder) => <article class="reminder-card" key={reminder.id} data-certification-id={reminder.id}>
-            <div class="reminder-icon">!</div>
-            <div><strong>{reminder.certificationName}</strong><p>{reminder.issuer}・到期日 {reminder.expiresAt}</p></div>
-            <span class={reminder.daysUntilExpiry <= 30 ? "urgent" : ""}>{expiryText(reminder.daysUntilExpiry)}</span>
-          </article>)}
-          {data?.certificationReminders.length === 0 && <div class="empty-state">目前沒有即將到期的證照。</div>}
-        </div>
+        <CertificationReminderList
+          reminders={data?.certificationReminders ?? []}
+          showEmployee={false}
+          emptyText="目前沒有即將到期的證照。"
+        />
       </div>
       <div class="panel">
         <div class="panel-heading"><div><h2>我的必修清單</h2><small>{data?.mandatoryTraining?.jobType}・必修至{LEVEL_LABEL[data?.mandatoryTraining?.requiredLevel ?? 1]}級</small></div></div>

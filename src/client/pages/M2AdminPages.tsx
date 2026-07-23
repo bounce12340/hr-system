@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { api, jsonBody } from "../api";
+import { CertificationReminderList, expiryText } from "../components/CertificationReminderList";
 import type {
   CertificationReminder,
   CertificationType,
@@ -15,12 +16,6 @@ const todayDate = () => new Date().toISOString().slice(0, 10);
 function Message({ text, error = false }: { text: string; error?: boolean }) {
   if (!text) return null;
   return <div class={`alert ${error ? "error" : "success"}`}>{text}</div>;
-}
-
-function expiryText(days: number): string {
-  if (days < 0) return `已逾期 ${Math.abs(days)} 天`;
-  if (days === 0) return "今天到期";
-  return `${days} 天後到期`;
 }
 
 export function AdminDashboard() {
@@ -48,14 +43,11 @@ export function AdminDashboard() {
     </div>
     <div class="panel">
       <div class="panel-heading"><div><h2>證照到期提醒</h2><small>提前 {data?.settings.certificationReminderDays ?? 60} 天顯示</small></div></div>
-      <div class="reminder-list">
-        {data?.certificationReminders.map((reminder) => <article class="reminder-card" key={reminder.id} data-certification-id={reminder.id}>
-          <div class="reminder-icon">!</div>
-          <div><strong>{reminder.employeeName}・{reminder.certificationName}</strong><p>{reminder.department}・{reminder.issuer}・到期日 {reminder.expiresAt}</p></div>
-          <span class={reminder.daysUntilExpiry <= 30 ? "urgent" : ""}>{expiryText(reminder.daysUntilExpiry)}</span>
-        </article>)}
-        {data?.certificationReminders.length === 0 && <div class="empty-state">目前沒有到期提醒。</div>}
-      </div>
+      <CertificationReminderList
+        reminders={data?.certificationReminders ?? []}
+        showEmployee
+        emptyText="目前沒有到期提醒。"
+      />
     </div>
   </section>;
 }
