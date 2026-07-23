@@ -9,24 +9,24 @@
     "typecheck": "tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.worker.json --noEmit && tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.tools.json --noEmit",
     "test": "vitest run",
     "wrangler:types": "wrangler types --include-runtime false",
-    "wrangler:check": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    "wrangler:check": "wrangler pages functions build functions --outdir .wrangler/functions-build --project-directory .",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrations:list": "wrangler d1 migrations list DB --local",
     "deploy": "npm run build && wrangler pages deploy dist --project-name hr-system"
   },
   "dependencies": {
-    "preact": "latest"
+    "preact": "10.29.7"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "latest",
+    "@cloudflare/vitest-pool-workers": "0.18.7",
     "@cloudflare/workers-types": "5.20260721.1",
-    "@preact/preset-vite": "latest",
+    "@preact/preset-vite": "2.10.6",
     "@types/babel__core": "7.20.5",
     "@types/node": "26.1.1",
     "typescript": "5.8.3",
-    "vite": "latest",
-    "vitest": "latest",
-    "wrangler": "latest"
+    "vite": "8.1.5",
+    "vitest": "4.1.10",
+    "wrangler": "4.113.0"
   },
   "overrides": {
     "sharp": "0.35.3"
