@@ -9,6 +9,7 @@ import {
   TestsPage,
   TrainingMatrixPage,
 } from "./M2AdminPages";
+import { RecruitmentPage } from "./M3AdminPages";
 import type {
   AssignmentEmployee,
   CompletionEmployee,
@@ -29,6 +30,7 @@ type AdminTab =
   | "tests"
   | "certifications"
   | "training-matrix"
+  | "recruitment"
   | "special-days";
 
 const LEVEL_LABEL = ["", "低", "中", "高"];
@@ -64,6 +66,7 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
     { id: "tests", label: "測驗紀錄" },
     { id: "certifications", label: "證照管理" },
     { id: "training-matrix", label: "訓練矩陣" },
+    { id: "recruitment", label: "招募管理" },
     { id: "special-days", label: "重要日子" },
   ];
   return (
@@ -100,6 +103,7 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
         {tab === "tests" && <TestsPage />}
         {tab === "certifications" && <CertificationsPage />}
         {tab === "training-matrix" && <TrainingMatrixPage />}
+        {tab === "recruitment" && <RecruitmentPage />}
         {tab === "special-days" && <SpecialDaysPage />}
       </main>
     </div>

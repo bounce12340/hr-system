@@ -248,6 +248,47 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
 .home-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 1rem; align-items: start; }
 .certification-card small { margin-top: .8rem; }
 
+.recruitment-nav { display: flex; gap: .35rem; overflow-x: auto; margin: -1rem 0 1.3rem; padding: .35rem; border: 1px solid var(--line); border-radius: 12px; background: #e9eeea; }
+.recruitment-nav button { flex: 0 0 auto; border: 0; border-radius: 8px; padding: .65rem .85rem; background: transparent; color: var(--muted); font-weight: 700; }
+.recruitment-nav button.active { background: white; color: var(--green); box-shadow: 0 3px 12px rgba(24, 57, 51, .09); }
+.funnel-grid { display: grid; grid-template-columns: repeat(7, minmax(116px, 1fr)); gap: .55rem; overflow-x: auto; padding-bottom: .3rem; }
+.funnel-card { position: relative; min-width: 116px; padding: .85rem; border: 1px solid var(--line); border-radius: 12px; background: white; }
+.funnel-card > span { display: grid; place-items: center; width: 23px; height: 23px; border-radius: 50%; background: var(--mint); color: var(--green); font-size: .7rem; font-weight: 700; }
+.funnel-card div { display: grid; margin-top: .7rem; }
+.funnel-card strong { font: 700 1.8rem "Plus Jakarta Sans"; }
+.funnel-card em { display: block; margin-top: .45rem; color: var(--muted); font-size: .68rem; font-style: normal; }
+.recruitment-table { min-width: 820px; }
+.talent-layout { grid-template-columns: minmax(260px, 330px) minmax(0, 1fr); }
+.candidate-card a { color: var(--green-2); font-weight: 700; font-size: .82rem; }
+.application-chips { display: flex; flex-wrap: wrap; gap: .45rem; }
+.application-chips > span { display: flex; align-items: center; gap: .45rem; padding: .4rem .55rem; border-radius: 8px; background: #f2f5f2; font-size: .76rem; }
+.inline-action { display: flex; align-items: center; gap: .55rem; }
+.inline-action select, .inline-action input { min-width: 0; flex: 1; }
+.inline-action button { flex: 0 0 auto; }
+.interview-layout { grid-template-columns: minmax(280px, 350px) minmax(0, 1fr); }
+.interview-card { align-items: flex-start; }
+.interview-card .button-row { margin-top: .5rem; }
+.interview-score-list { display: grid; margin-bottom: .9rem; }
+.interview-score-row { display: grid; grid-template-columns: minmax(130px, .8fr) 100px minmax(200px, 1.5fr) auto; gap: .55rem; padding: .55rem 0; border-bottom: 1px solid var(--line); }
+.compensation-picker { max-width: 700px; }
+.compensation-layout { display: grid; grid-template-columns: repeat(2, minmax(300px, 1fr)); gap: 1rem; align-items: start; }
+.offer-template { min-height: 300px; white-space: pre-wrap; }
+.onboarding-layout { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.onboarding-item-row { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .55rem; border-radius: 8px; background: #f4f7f4; }
+.onboarding-item-row > span { display: grid; }
+.onboarding-item-row.inactive { opacity: .58; }
+.checklist-list { display: grid; }
+.checklist-row { display: grid; gap: .55rem; padding: .8rem 0; border-bottom: 1px solid var(--line); }
+.checklist-row.completed { opacity: .72; }
+.checklist-row > .inline-check { justify-content: flex-start; }
+.checklist-row > .inline-check span { display: grid; }
+.probation-layout { grid-template-columns: minmax(280px, 350px) minmax(0, 1fr); }
+.probation-card.due-soon { border-color: #e4aaa2; box-shadow: 0 0 0 2px rgba(185, 70, 70, .07); }
+.probation-facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: .45rem; margin: 0; }
+.probation-facts div { padding: .55rem; border-radius: 8px; background: #f4f7f4; }
+.probation-facts dt { color: var(--muted); font-size: .68rem; }
+.probation-facts dd { margin: .2rem 0 0; font-size: .8rem; font-weight: 700; }
+
 @media (max-width: 900px) {
   .app-shell { display: block; }
   .sidebar { display: none; }
@@ -255,6 +296,7 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
   .mobile-header select { width: auto; }
   .split-layout, .attendance-layout { grid-template-columns: 1fr; }
   .cert-layout, .home-grid { grid-template-columns: 1fr; }
+  .talent-layout, .interview-layout, .compensation-layout, .onboarding-layout, .probation-layout { grid-template-columns: 1fr; }
   .sticky-form { position: static; }
   .employee-header { grid-template-columns: 1fr auto; }
   .employee-header nav { grid-column: 1 / -1; grid-row: 2; overflow-x: auto; justify-content: flex-start; }
@@ -288,4 +330,10 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
   .score-row em { grid-column: 1 / -1; }
   .reminder-card { grid-template-columns: auto 1fr; }
   .reminder-card > span { grid-column: 2; justify-self: start; }
+  .recruitment-nav { margin-top: -.5rem; }
+  .interview-score-row { grid-template-columns: 1fr 88px; }
+  .interview-score-row input:nth-of-type(2) { grid-column: 1 / -1; }
+  .probation-facts { grid-template-columns: repeat(2, 1fr); }
+  .inline-action { align-items: stretch; flex-direction: column; }
+  .inline-action button { width: 100%; }
 }

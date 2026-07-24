@@ -22,6 +22,14 @@ export function AdminDashboard() {
   const [data, setData] = useState<{
     settings: TrainingSettings;
     certificationReminders: CertificationReminder[];
+    probationReminders: Array<{
+      id: string;
+      employeeName: string;
+      employeeNo: string;
+      department: string;
+      dueDate: string;
+      daysUntilDue: number;
+    }>;
     pendingEnrollmentCount: number;
     retrainingRequiredCount: number;
     missingMandatoryCount: number;
@@ -33,10 +41,11 @@ export function AdminDashboard() {
       .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "讀取失敗。"));
   }, []);
   return <section>
-    <div class="page-heading"><div><p class="eyebrow">M2 REMINDER CENTER</p><h1>管理儀表板</h1><p>集中掌握證照到期、待審報名與補訓事項。</p></div></div>
+    <div class="page-heading"><div><p class="eyebrow">HR REMINDER CENTER</p><h1>管理儀表板</h1><p>集中掌握證照、試用期、待審報名與補訓事項。</p></div></div>
     <Message text={error} error />
     <div class="metric-row">
       <div class="metric accent"><span>證照到期提醒</span><strong>{data?.certificationReminders.length ?? 0}</strong></div>
+      <div class="metric"><span>試用期到期提醒</span><strong>{data?.probationReminders.length ?? 0}</strong></div>
       <div class="metric"><span>待審報名</span><strong>{data?.pendingEnrollmentCount ?? 0}</strong></div>
       <div class="metric"><span>測驗需補訓</span><strong>{data?.retrainingRequiredCount ?? 0}</strong></div>
       <div class="metric"><span>未完成必修</span><strong>{data?.missingMandatoryCount ?? 0}</strong></div>
@@ -48,6 +57,19 @@ export function AdminDashboard() {
         showEmployee
         emptyText="目前沒有到期提醒。"
       />
+    </div>
+    <div class="panel section-title">
+      <div class="panel-heading"><div><h2>試用期到期提醒</h2><small>提醒天數可在「招募管理 → 試用期」設定</small></div></div>
+      <div class="reminder-list">
+        {(data?.probationReminders ?? []).map((reminder) => (
+          <article class="reminder-card">
+            <div class="reminder-icon">試</div>
+            <div><strong>{reminder.employeeName}</strong><p>{reminder.employeeNo}・{reminder.department}・到期日 {reminder.dueDate}</p></div>
+            <span class={reminder.daysUntilDue <= 7 ? "urgent" : ""}>{reminder.daysUntilDue < 0 ? `逾期 ${Math.abs(reminder.daysUntilDue)} 天` : `${reminder.daysUntilDue} 天後`}</span>
+          </article>
+        ))}
+        {(data?.probationReminders.length ?? 0) === 0 && <div class="empty-state">目前沒有試用期到期提醒。</div>}
+      </div>
     </div>
   </section>;
 }

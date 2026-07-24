@@ -2,7 +2,7 @@
 
 Cloudflare Pages 靜態 SPA（Preact + Vite）與 Pages Functions REST API，資料儲存在 Cloudflare D1。全站介面為繁體中文，時區固定為 `Asia/Taipei`。
 
-目前依開發順序完成 Step 1～3 的 repo／Wrangler／schema 與 seed、Auth／RBAC、M1 學習排課與 M2 教育訓練／證照管理。M3～M5 仍只有既有 schema，尚未建立應用路由或頁面。
+目前已完成 repo／Wrangler／schema 與 seed、Auth／RBAC、M1 學習排課、M2 教育訓練／證照管理，以及 M3 招募管理。M4～M5 仍只有既有 schema，尚未建立應用路由或頁面。
 
 ## 快速開始
 
@@ -81,7 +81,7 @@ npm run db:migrate:local       # 套用本機 D1 migration
 - 隨機 session token 只在瀏覽器 HttpOnly、SameSite=Strict cookie；D1 僅存 SHA-256 token hash。
 - 所有 admin API 在 API 層驗證角色；employee API 從 session 的 `employee_id` 決定資料範圍，不接受前端傳入他人 ID。
 - mutation 檢查 `Origin` 並限定 JSON body；錯誤訊息不回傳 stack trace。
-- 薪資欄位存在 `employees` schema，但本階段沒有任何 employee API 會查詢或回傳薪資。
+- 核薪與薪酬資料僅能透過 M3 admin API 讀寫；employee API 不查詢或回傳任何薪資資料。
 
 ## M2 功能
 
@@ -93,12 +93,24 @@ npm run db:migrate:local       # 套用本機 D1 migration
 - 職務別訓練矩陣：職務類型 × 必修課交叉表，依在職員工完成數計算每格百分比；綠燈 ≥ 80%、黃燈 ≥ 50%、紅燈 < 50%，非該職務必修顯示 `—`。
 - 員工端：首頁顯示自己的證照提醒、必修逐課狀態與近期場次數；另有完整證照清單與報名審核狀態。
 
+## M3 功能
+
+- 職缺管理：職稱、部門、需求人數、JD 與開放／暫停／關閉狀態的完整 CRUD。
+- 履歷人才庫：候選人聯絡資料、來源、履歷連結與備註可搜尋維護；`candidate_applications` 將人才與職缺分離，同一候選人可跨多個職缺重複使用。
+- 招募狀態機：`投遞 → 篩選 → 面試 → 核薪 → 發送錄取 → 錄取 → 到職` 逐步轉移，另可於流程中淘汰；每次轉移均保留操作者、時間與備註。
+- 面試管理：依應徵紀錄安排多輪面試，維護時間、面試官、地點與狀態；每輪可自訂多個 1～5 分評分面向及書面評語。
+- 核薪與錄取：期望、建議、核定薪資及薪酬說明只開放 admin；錄取通知可依候選人、職缺與核定薪資產生範本、編輯並一鍵複製。
+- 到職文件：HR 可自訂必填／選填項目；每位錄取候選人的 checklist 可逐項勾選、取消與保存備註，必填項完成後才能進入到職。
+- 試用期追蹤：到職日加試用天數自動計算到期日，記錄通過／延長／不通過；`settings.probation_reminder_days` 預設 14 天，可調整，提醒同時顯示於招募頁與管理儀表板。
+- 招募漏斗 API：同時提供各階段目前人數與歷史進入人數，供目前招募工作台及後續 M4 報表使用；本階段未建立 M4 報表頁。
+
 ## Migration 與 seed
 
 - `0001_initial_schema.sql`：33 張業務表，涵蓋規格列出的 M1～M5 完整資料模型。
 - `0002_indexes.sql`：查詢索引與 `updated_at` triggers。
 - `0003_seed.sql`：15 位員工、3 種職務類型、9 門課、6 場次、封鎖／全員必訓日、2 職缺、4 候選人與到期證照。
 - `0004_m2_enrollment_review.sql`：選修報名審核人、時間、備註欄位與待審佇列索引。
+- `0005_m3_recruitment.sql`：跨職缺應徵紀錄、狀態歷程、核薪、錄取通知、到職 checklist、試用期關聯與索引。
 
 場次與提醒日期使用 `date('now', '+N day')`，確保每次新環境套 seed 時仍落在未來一個月。
 
@@ -112,9 +124,12 @@ npm run db:migrate:local       # 套用本機 D1 migration
 - 選修報名設定預設直接核准；切為審核制後，新申請先進 `waitlisted`，不先占用正式名額，核准時再檢查容量與衝突。
 - 證照到期提醒含「已逾期」與未來 N 天內到期資料；無到期日的永久證照不產生提醒。
 - 訓練矩陣只列必修課，紅／黃／綠門檻採 `<50%`、`50–79%`、`≥80%`。
+- 候選人主檔作為可重用人才庫；每次應徵另存 `candidate_applications`，避免把候選人永久綁定單一職缺。
+- 招募狀態採 forward-only：面試進核薪前須有完成的面試評分、核薪進錄取前須核定薪資、錄取進 hired 前須接受通知、hired 進到職前須完成必填文件。
+- 試用期提醒沿用證照提醒的 on-read 計算模式，不新增排程服務；未記錄結果且在提醒區間內或已逾期者持續顯示。
 - 日期存 `YYYY-MM-DD`、時間存 `HH:mm`、事件 timestamp 存 ISO 8601 UTC；畫面業務語意一律採 Asia/Taipei。
 - `tsconfig.test.json` 僅對 Cloudflare Vitest 第三方宣告檔啟用 `skipLibCheck`，應用端與 Worker 端維持完整 strict typecheck。
 
 ## 尚未開始
 
-M3 招募、M4 報表、M5 人才盤點的功能、路由與頁面均未開始；需等待下一階段明確確認。
+M4 報表與 M5 人才盤點的功能、路由與頁面尚未開始；需等待下一階段明確確認。
