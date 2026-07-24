@@ -8,6 +8,7 @@ import {
   uuid,
 } from "./http";
 import type { ApiContext, AuthUser } from "./types";
+import { probationReminders } from "./m3";
 
 interface SettingRow {
   settingKey: string;
@@ -219,9 +220,10 @@ async function expiryReminders(db: D1Database, employeeId?: string): Promise<Exp
 }
 
 async function dashboard(context: ApiContext): Promise<Response> {
-  const [settings, reminders, pending, retraining, mandatory] = await Promise.all([
+  const [settings, reminders, probationReminderRows, pending, retraining, mandatory] = await Promise.all([
     getTrainingSettings(context.env.DB),
     expiryReminders(context.env.DB),
+    probationReminders(context.env.DB),
     context.env.DB.prepare(`
       SELECT COUNT(*) AS count FROM enrollments
       WHERE source = 'self' AND enrollment_status = 'waitlisted'
@@ -238,6 +240,7 @@ async function dashboard(context: ApiContext): Promise<Response> {
   return json({
     settings,
     certificationReminders: reminders,
+    probationReminders: probationReminderRows,
     pendingEnrollmentCount: pending?.count ?? 0,
     retrainingRequiredCount: retraining?.count ?? 0,
     missingMandatoryCount,

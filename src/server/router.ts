@@ -9,6 +9,7 @@ import {
 } from "./http";
 import { handleAdminM1, handleEmployeeM1 } from "./m1";
 import { handleAdminM2, handleEmployeeM2 } from "./m2";
+import { handleAdminM3 } from "./m3";
 import type { ApiContext } from "./types";
 
 function corsPreflight(request: Request): Response {
@@ -64,6 +65,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       if (response) return response;
       const m2Response = await handleAdminM2(context, path);
       if (m2Response) return m2Response;
+      const m3Response = await handleAdminM3(context, path);
+      if (m3Response) return m3Response;
     }
     if (path.startsWith("/api/employee/")) {
       const response = await handleEmployeeM1(context, path);
