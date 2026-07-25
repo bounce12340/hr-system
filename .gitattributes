@@ -1,0 +1,13 @@
+# 版控內一律以 LF 儲存，checkout 時由各平台的 core.autocrlf 決定working copy 行尾。
+# 沒有這份設定時，在 Windows 建立的檔案會以 CRLF 進版控，Linux／macOS 貢獻者
+# 取得的檔案行尾會不一致。
+* text=auto eol=lf
+
+# 明確標記為二進位，避免被當文字做行尾轉換。
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
