@@ -83,13 +83,31 @@ S1–S7、S9–S12 全數 PASS。重點：
 
 影響：cand-03 人在「發送錄取」階段，卻從未計入「投遞／篩選／面試」的 `enteredCount`。**M4 若直接以 `enteredCount` 繪製漏斗，上游數字會被低估。**
 
-判定：非 M3 缺陷（API 實際轉移的時間戳完整無誤，規格 §八 只要求候選人分佈於不同階段，已滿足），屬 seed 資料造型問題。**建議在 M4 開工前於 seed 補齊上游歷程。**
+判定：非 M3 缺陷（API 實際轉移的時間戳完整無誤，規格 §八 只要求候選人分佈於不同階段，已滿足），屬 seed 資料造型問題。
+
+**已於 `0006_m3_cleanup_and_history_backfill.sql` 修正並驗證**。以全新 D1 重跑全部 migration 後實測各階段「曾進入」數：
+
+| 階段 | 修正前 | 修正後 |
+|---|---|---|
+| applied | 1 | **4** |
+| screening | 1 | **3** |
+| interview | 1 | **2** |
+| salary_approval | 0 | **1** |
+| offer | 1 | **1** |
+
+修正後為正常單調遞減的漏斗形狀。實作要點：僅回填「歷程僅有 0005 那一列移轉紀錄」的應徵，不覆蓋任何經 API 產生的真實歷程；`rejected` 不回填，因淘汰發生於哪一階段無法從現有資料推得。
 
 ### 觀察 2：schema 技術債 — 孤兒表與死欄位
 
 `offers`、`onboarding_checklist`、`candidate_status_history` 三張表及 `candidates.job_opening_id`、`candidates.status` 兩個欄位，已被 0005 導入的新表取代但未清除。
 
-影響：功能不受影響，但 `offers` 恰與規格 §六 點名的表名相同，保留孤兒版本會誤導讀者（開源後尤甚）。建議補一支 0006 清理 migration。
+影響：功能不受影響，但 `offers` 恰與規格 §六 點名的表名相同，保留孤兒版本會誤導讀者（開源後尤甚）。
+
+**已於 `0006_m3_cleanup_and_history_backfill.sql` 處理（部分）**：
+
+- 三張孤兒表已 `DROP`。移除前以 SQL 關鍵字邊界（`FROM`／`JOIN`／`INTO`／`UPDATE`／`DELETE FROM`）逐一確認無任何程式碼參照——原始回報的命中其實全部落在名稱相近但仍在使用的 `application_onboarding_checklist` 與 `candidate_application_status_history`，若照名稱直接刪會誤刪在用的表。
+- 只索引死欄位的 `idx_candidates_opening_status` 一併移除。
+- **兩個死欄位刻意保留**：SQLite 的 `DROP COLUMN` 不支援移除帶 CHECK 約束的欄位（`candidates.status` 有 CHECK），清除須整表重建；而 `candidate_applications` 有 FK 指向 `candidates(id)`，在 D1 migration 中重建的風險高於效益。已於 0006 註記其為 pre-0005 殘留。
 
 ### 觀察 3：跨階段驗收的密碼會失聯（流程問題）
 
