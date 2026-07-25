@@ -6,3 +6,8 @@ dist/
 coverage/
 *.log
 
+# 本機驗收/除錯殘留
+*.jar
+scratch_*
+.playwright-mcp/
+

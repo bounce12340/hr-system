@@ -78,7 +78,7 @@
 ## 二、檔案類驗證
 
 ### README 部署步驟
-**PASS**。`README.md:39-65` 完整涵蓋：`wrangler login` → `wrangler d1 create` → 寫入 `database_id` → `wrangler:types` → `wrangler d1 migrations apply DB --remote` → `wrangler pages project create` → `npm run deploy` → Dashboard 綁定自訂網域 `hr.example.com`。另有本機開發（`README.md:9-18`）、Demo 帳號（`README.md:20-26`）、設計決定（`README.md:94-102`）、尚未開始事項（`README.md:104-106`，明確列出 M2～M5 功能未開始）等章節，誠實揭露交付範圍。
+**PASS**。`README.md:39-65` 完整涵蓋：`wrangler login` → `wrangler d1 create` → 寫入 `database_id` → `wrangler:types` → `wrangler d1 migrations apply DB --remote` → `wrangler pages project create` → `npm run deploy` → Dashboard 綁定自訂網域（範例 `hr.example.com`）。另有本機開發（`README.md:9-18`）、Demo 帳號（`README.md:20-26`）、設計決定（`README.md:94-102`）、尚未開始事項（`README.md:104-106`，明確列出 M2～M5 功能未開始）等章節，誠實揭露交付範圍。
 
 ### Migration 檔完整性
 **PASS**。`migrations/0001_initial_schema.sql`（349 行，33 張表）、`migrations/0002_indexes.sql`（47 行，索引與 `updated_at` trigger）、`migrations/0003_seed.sql`（109 行，seed 資料）。資料表清單已於上方「一之4」核對涵蓋規格第六節全部項目。

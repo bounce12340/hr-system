@@ -60,7 +60,7 @@ npm run db:migrate:local       # 套用本機 D1 migration
    npm run deploy
    ```
 
-5. 在 Cloudflare Dashboard 的 **Workers & Pages → hr-system → Custom domains** 加入 `hr.example.com`。網域可改，seed 的 `settings.custom_domain` 只是預設值。
+5. 在 Cloudflare Dashboard 的 **Workers & Pages → hr-system → Custom domains** 加入自訂網域（範例 `hr.example.com`）。網域可改，seed 的 `settings.custom_domain` 只是預設值。
 
 部署前不要將真實憑證寫入 repo；未來若加入 secret，使用 `wrangler secret`／Pages Secrets。
 
