@@ -135,6 +135,7 @@ textarea { min-height: 92px; resize: vertical; }
 .panel { padding: 1.1rem; display: grid; gap: .85rem; }
 .sticky-form { position: sticky; top: 1rem; }
 .table-card { overflow-x: auto; }
+.table-toolbar { display: flex; justify-content: space-between; align-items: center; gap: .8rem; padding: .9rem 1rem 0; }
 table { width: 100%; border-collapse: collapse; min-width: 680px; }
 th { text-align: left; color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; background: #f4f6f3; }
 th, td { padding: .8rem .9rem; border-bottom: 1px solid #e9edea; vertical-align: top; }
@@ -204,6 +205,8 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
 .reminder-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--red); color: white; font-weight: 700; }
 
 .mandatory-table { min-width: 920px; }
+.employee-table { min-width: 980px; }
+.attendance-record-table { min-width: 920px; }
 .course-status-list { display: flex; flex-wrap: wrap; gap: .35rem; }
 .course-status-list span { padding: .35rem .5rem; border-radius: 7px; font-size: .72rem; font-weight: 600; }
 .course-status-list .completed { color: #236552; background: #ddf0e8; }

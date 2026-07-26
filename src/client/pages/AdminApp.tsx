@@ -11,6 +11,8 @@ import {
 } from "./M2AdminPages";
 import { RecruitmentPage } from "./M3AdminPages";
 import { ReportsPage } from "./M4AdminPages";
+import { EmployeeManagementPage } from "./EmployeeAdminPages";
+import { AttendanceManagementPage } from "./AttendanceAdminPages";
 import type {
   AssignmentEmployee,
   CompletionEmployee,
@@ -22,6 +24,7 @@ import type {
 
 type AdminTab =
   | "dashboard"
+  | "employees"
   | "calendar"
   | "courses"
   | "attendance"
@@ -33,6 +36,7 @@ type AdminTab =
   | "training-matrix"
   | "recruitment"
   | "special-days"
+  | "attendance-management"
   | "reports";
 
 const LEVEL_LABEL = ["", "低", "中", "高"];
@@ -59,6 +63,7 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
   const [tab, setTab] = useState<AdminTab>("dashboard");
   const tabs: Array<{ id: AdminTab; label: string }> = [
     { id: "dashboard", label: "管理儀表板" },
+    { id: "employees", label: "員工管理" },
     { id: "calendar", label: "排課月曆" },
     { id: "courses", label: "課程管理" },
     { id: "attendance", label: "出席登錄" },
@@ -70,6 +75,7 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
     { id: "training-matrix", label: "訓練矩陣" },
     { id: "recruitment", label: "招募管理" },
     { id: "special-days", label: "重要日子" },
+    { id: "attendance-management", label: "出缺勤管理" },
     { id: "reports", label: "報表" },
   ];
   return (
@@ -97,6 +103,7 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
           </select>
         </header>
         {tab === "dashboard" && <AdminDashboard />}
+        {tab === "employees" && <EmployeeManagementPage />}
         {tab === "calendar" && <AdminCalendar />}
         {tab === "courses" && <CourseManagement />}
         {tab === "attendance" && <AttendancePage />}
@@ -108,6 +115,7 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
         {tab === "training-matrix" && <TrainingMatrixPage />}
         {tab === "recruitment" && <RecruitmentPage />}
         {tab === "special-days" && <SpecialDaysPage />}
+        {tab === "attendance-management" && <AttendanceManagementPage />}
         {tab === "reports" && <ReportsPage />}
       </main>
     </div>

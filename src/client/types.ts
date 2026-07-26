@@ -146,3 +146,54 @@ export interface CertificationType {
   defaultValidityMonths: number | null;
   active: number;
 }
+
+export type EmployeeStatus = "active" | "inactive";
+
+export interface Employee {
+  id: string;
+  employeeNo: string;
+  name: string;
+  email: string;
+  department: string;
+  grade: string;
+  title: string;
+  jobTypeId: string;
+  jobType: string;
+  hireDate: string;
+  terminationDate: string | null;
+  status: EmployeeStatus;
+  salary: number | null;
+}
+
+export interface JobTypeOption {
+  id: string;
+  name: string;
+  requiredLevel: number;
+}
+
+export interface AttendanceRecord {
+  id: string;
+  employeeId: string;
+  employeeNo: string;
+  employeeName: string;
+  department: string;
+  grade: string;
+  attendanceDate: string;
+  absenceHours: number;
+  overtimeHours: number;
+  absenceType: string | null;
+  source: "manual" | "csv";
+  notes: string;
+}
+
+export interface ImportRowError {
+  row: number;
+  message: string;
+}
+
+export interface ImportSummary {
+  imported: number;
+  updated: number;
+  skipped: number;
+  errors: ImportRowError[];
+}

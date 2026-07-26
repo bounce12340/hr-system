@@ -1,5 +1,5 @@
 import { isValidIsoDate, parseCsvTable, parseNonNegativeNumber } from "./csv";
-import { ApiError, json, optionalString, parseJson, requireAdmin, uuid } from "./http";
+import { ApiError, json, optionalString, parseJson, requiredString, requireAdmin, uuid } from "./http";
 import { completionData, taipeiNow } from "./m1";
 import { funnelData } from "./m3";
 import type { ApiContext } from "./types";
@@ -480,6 +480,160 @@ async function importAttendance(context: ApiContext): Promise<Response> {
   return json(summary);
 }
 
+interface AttendanceRecordInput {
+  employeeId?: unknown;
+  attendanceDate?: unknown;
+  absenceHours?: unknown;
+  overtimeHours?: unknown;
+  absenceType?: unknown;
+  notes?: unknown;
+}
+
+interface AttendanceRecordFields {
+  employeeId: string;
+  attendanceDate: string;
+  absenceHours: number;
+  overtimeHours: number;
+  absenceType: string | null;
+  notes: string;
+}
+
+interface AttendanceRecordRow extends AttendanceRecordFields {
+  id: string;
+  employeeNo: string;
+  employeeName: string;
+  department: string;
+  grade: string;
+  source: "manual" | "csv";
+}
+
+function nonNegativeNumberField(value: unknown, label: string): number {
+  if (value === undefined || value === null || value === "") return 0;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new ApiError(422, `${label}須為非負數字。`);
+  }
+  return value;
+}
+
+function nullableTextField(value: unknown, label: string, maxLength: number): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string") throw new ApiError(422, `${label}格式不正確。`);
+  const normalized = value.trim();
+  if (normalized === "") return null;
+  if (normalized.length > maxLength) throw new ApiError(422, `${label}不可超過 ${maxLength} 字。`);
+  return normalized;
+}
+
+/** 出缺勤單筆建立／更新共用驗證。PATCH 亦採全量取代，與 M1／M3 既有寫法一致。 */
+function parseAttendanceRecord(body: AttendanceRecordInput): AttendanceRecordFields {
+  const attendanceDate = requiredString(body.attendanceDate, "日期", 10);
+  if (!isValidIsoDate(attendanceDate)) throw new ApiError(422, "日期格式須為 YYYY-MM-DD。");
+  return {
+    employeeId: requiredString(body.employeeId, "員工", 100),
+    attendanceDate,
+    absenceHours: nonNegativeNumberField(body.absenceHours, "缺勤時數"),
+    overtimeHours: nonNegativeNumberField(body.overtimeHours, "加班時數"),
+    absenceType: nullableTextField(body.absenceType, "假別", 50),
+    notes: optionalString(body.notes, "備註", 2000),
+  };
+}
+
+async function ensureEmployeeExists(db: D1Database, employeeId: string): Promise<void> {
+  const employee = await db.prepare("SELECT id FROM employees WHERE id = ?").bind(employeeId).first();
+  if (!employee) throw new ApiError(422, "找不到指定員工。");
+}
+
+const ATTENDANCE_RECORD_SELECT = `
+  SELECT a.id, a.employee_id AS employeeId, e.employee_no AS employeeNo, e.name AS employeeName,
+         e.department, e.grade, a.attendance_date AS attendanceDate,
+         a.absence_hours AS absenceHours, a.overtime_hours AS overtimeHours,
+         a.absence_type AS absenceType, a.source, a.notes
+  FROM attendance a
+  JOIN employees e ON e.id = a.employee_id
+`;
+
+async function getAttendanceRecord(db: D1Database, id: string): Promise<AttendanceRecordRow> {
+  const row = await db.prepare(`${ATTENDANCE_RECORD_SELECT} WHERE a.id = ?`).bind(id).first<AttendanceRecordRow>();
+  if (!row) throw new ApiError(404, "找不到指定的出缺勤紀錄。");
+  return row;
+}
+
+/**
+ * 出缺勤原始紀錄列表（非彙總）。複用報表共用的 parseReportFilters／employeeScope，
+ * 篩選邏輯只維護一份；額外加 employeeId 篩選，供單筆管理鎖定特定員工。
+ */
+async function listAttendanceRecords(context: ApiContext): Promise<Response> {
+  const filters = await parseReportFilters(context);
+  const employeeId = optionalString(context.url.searchParams.get("employeeId"), "員工", 100) || null;
+  const scope = employeeScope(filters);
+  const conditions = ["a.attendance_date >= ?", "a.attendance_date < ?"];
+  const bindings: string[] = [filters.startDate, filters.endDateExclusive];
+  if (employeeId) {
+    conditions.push("a.employee_id = ?");
+    bindings.push(employeeId);
+  }
+  const result = await context.env.DB.prepare(`
+    ${ATTENDANCE_RECORD_SELECT}
+    WHERE ${conditions.join(" AND ")}${scope.clause}
+    ORDER BY a.attendance_date DESC, e.employee_no
+  `).bind(...bindings, ...scope.bindings).all<AttendanceRecordRow>();
+  return json({ filters, records: result.results });
+}
+
+/**
+ * 手動新增單筆出缺勤（規格 §五 M4：資料來源為手動輸入＋CSV 匯入）。
+ * 同員工同日期已有紀錄時採「更新」而非拒絕，刻意與既有 CSV 匯入行為一致
+ * （見上方 importAttendance），避免手動／CSV 交錯操作時使用者要先查詢才能決定呼叫哪支 API。
+ */
+async function createAttendanceRecord(context: ApiContext): Promise<Response> {
+  const fields = parseAttendanceRecord(await parseJson<AttendanceRecordInput>(context.request));
+  await ensureEmployeeExists(context.env.DB, fields.employeeId);
+  const existing = await context.env.DB.prepare(
+    "SELECT id FROM attendance WHERE employee_id = ? AND attendance_date = ?",
+  ).bind(fields.employeeId, fields.attendanceDate).first<{ id: string }>();
+  if (existing) {
+    await context.env.DB.prepare(`
+      UPDATE attendance SET absence_hours = ?, overtime_hours = ?, absence_type = ?, source = 'manual', notes = ?
+      WHERE id = ?
+    `).bind(fields.absenceHours, fields.overtimeHours, fields.absenceType, fields.notes, existing.id).run();
+    return json({ record: await getAttendanceRecord(context.env.DB, existing.id) });
+  }
+  const id = uuid();
+  await context.env.DB.prepare(`
+    INSERT INTO attendance (id, employee_id, attendance_date, absence_hours, overtime_hours, absence_type, source, notes)
+    VALUES (?, ?, ?, ?, ?, ?, 'manual', ?)
+  `).bind(
+    id, fields.employeeId, fields.attendanceDate, fields.absenceHours, fields.overtimeHours,
+    fields.absenceType, fields.notes,
+  ).run();
+  return json({ record: await getAttendanceRecord(context.env.DB, id) }, 201);
+}
+
+/** 更新單筆出缺勤。若異動後的員工＋日期組合與另一筆既有紀錄重複，回 409 避免產生邏輯上的重複列。 */
+async function updateAttendanceRecord(context: ApiContext, id: string): Promise<Response> {
+  const fields = parseAttendanceRecord(await parseJson<AttendanceRecordInput>(context.request));
+  await ensureEmployeeExists(context.env.DB, fields.employeeId);
+  const conflict = await context.env.DB.prepare(
+    "SELECT id FROM attendance WHERE employee_id = ? AND attendance_date = ? AND id <> ?",
+  ).bind(fields.employeeId, fields.attendanceDate, id).first<{ id: string }>();
+  if (conflict) throw new ApiError(409, "該員工當日已有其他出缺勤紀錄。");
+  const result = await context.env.DB.prepare(`
+    UPDATE attendance SET employee_id = ?, attendance_date = ?, absence_hours = ?, overtime_hours = ?,
+      absence_type = ?, notes = ? WHERE id = ?
+  `).bind(
+    fields.employeeId, fields.attendanceDate, fields.absenceHours, fields.overtimeHours,
+    fields.absenceType, fields.notes, id,
+  ).run();
+  if (result.meta.changes === 0) throw new ApiError(404, "找不到指定的出缺勤紀錄。");
+  return json({ record: await getAttendanceRecord(context.env.DB, id) });
+}
+
+async function deleteAttendanceRecord(context: ApiContext, id: string): Promise<Response> {
+  const result = await context.env.DB.prepare("DELETE FROM attendance WHERE id = ?").bind(id).run();
+  if (result.meta.changes === 0) throw new ApiError(404, "找不到指定的出缺勤紀錄。");
+  return json({ id, deleted: true });
+}
+
 async function report(
   context: ApiContext,
   build: (db: D1Database, filters: ReportFilters) => Promise<unknown>,
@@ -512,6 +666,19 @@ export async function handleAdminM4(context: ApiContext, path: string): Promise<
 
   if (path === `${base}/attendance/import` && context.request.method === "POST") {
     return importAttendance(context);
+  }
+  if (path === `${base}/attendance/records` && context.request.method === "GET") {
+    return listAttendanceRecords(context);
+  }
+  if (path === `${base}/attendance/records` && context.request.method === "POST") {
+    return createAttendanceRecord(context);
+  }
+  const recordMatch = path.match(/^\/api\/admin\/reports\/attendance\/records\/([^/]+)$/);
+  if (recordMatch?.[1] && context.request.method === "PATCH") {
+    return updateAttendanceRecord(context, recordMatch[1]);
+  }
+  if (recordMatch?.[1] && context.request.method === "DELETE") {
+    return deleteAttendanceRecord(context, recordMatch[1]);
   }
   if (context.request.method !== "GET") return null;
 

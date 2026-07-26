@@ -884,15 +884,204 @@ async function completionTracking(context: ApiContext): Promise<Response> {
   return json({ employees, departments: departments.results.map((row) => row.department) });
 }
 
+/**
+ * 員工主檔清單（供員工管理頁使用）。
+ *
+ * 刻意不共用 `activeEmployees()`：那支只回排課指派需要的 6 個欄位且固定只取在職者，
+ * 同時被場次指派邏輯使用（見 :283），改動它會連帶影響應上名單的計算。
+ * 員工管理頁需要完整欄位才能送出 PATCH（後端採整筆取代語意），也需要看得到離職者。
+ *
+ * 回傳欄位是 `activeEmployees()` 的超集合，既有呼叫端不受影響。
+ * `?includeInactive=true` 才會帶出離職者，預設維持只回在職，避免改變既有行為。
+ */
+/**
+ * 員工主檔清單（供員工管理頁使用）。
+ *
+ * 刻意不共用 `activeEmployees()`：那支只回排課指派需要的 6 個欄位且固定只取在職者，
+ * 同時被場次指派邏輯使用（見 :283），改動它會連帶影響應上名單的計算。
+ * 員工管理頁需要完整欄位才能送出 PATCH（後端採整筆取代語意），也需要看得到離職者。
+ *
+ * 回傳欄位是 `activeEmployees()` 的超集合，既有呼叫端不受影響。
+ * `?includeInactive=true` 才會帶出離職者，預設維持只回在職，避免改變既有行為。
+ */
 async function listEmployees(context: ApiContext): Promise<Response> {
-  const employees = await activeEmployees(context.env.DB);
-  return json({ employees });
+  const includeInactive = new URL(context.request.url).searchParams.get("includeInactive") === "true";
+  const result = await context.env.DB.prepare(`
+    SELECT e.id, e.employee_no AS employeeNo, e.name, e.email, e.department,
+           e.grade, e.title, e.job_type_id AS jobTypeId,
+           jt.name AS jobType, jt.required_level AS requiredLevel,
+           e.hire_date AS hireDate, e.termination_date AS terminationDate,
+           e.status, e.salary
+    FROM employees e
+    JOIN job_types jt ON jt.id = e.job_type_id
+    ${includeInactive ? "" : "WHERE e.status = 'active'"}
+    ORDER BY e.status, e.department, e.employee_no
+  `).all();
+  return json({ employees: result.results });
 }
 
 const EMPLOYEE_CSV_HEADERS = [
   "員工編號", "姓名", "Email", "部門", "職等", "職稱", "職務類型", "到職日", "薪資",
 ] as const;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+interface EmployeeInput {
+  employeeNo?: unknown;
+  name?: unknown;
+  email?: unknown;
+  department?: unknown;
+  grade?: unknown;
+  title?: unknown;
+  jobTypeId?: unknown;
+  hireDate?: unknown;
+  terminationDate?: unknown;
+  status?: unknown;
+  salary?: unknown;
+}
+
+interface EmployeeFields {
+  employeeNo: string;
+  name: string;
+  email: string;
+  department: string;
+  grade: string;
+  title: string;
+  jobTypeId: string;
+  hireDate: string;
+  terminationDate: string | null;
+  status: "active" | "inactive";
+  salary: number | null;
+}
+
+interface EmployeeRecord extends EmployeeFields {
+  id: string;
+  jobType: string;
+}
+
+function nullableSalary(value: unknown): number | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new ApiError(422, "薪資須為非負整數。");
+  }
+  return value;
+}
+
+/**
+ * 員工主檔建立／更新共用驗證。PATCH 與 updateCourse 等既有寫法一致，採全量取代而非局部合併。
+ * status 省略時預設為在職（新進員工最常見情境）；設為 inactive 時要求填 terminationDate，
+ * 設為 active 時一律清空 terminationDate（即使呼叫端仍夾帶舊值），避免離職日殘留使報表誤判在職狀態。
+ */
+function parseEmployee(body: EmployeeInput): EmployeeFields {
+  const status = body.status === undefined || body.status === null || body.status === ""
+    ? "active"
+    : body.status === "active" || body.status === "inactive"
+      ? body.status
+      : null;
+  if (!status) throw new ApiError(422, "員工狀態必須是在職或離職。");
+
+  const email = requiredString(body.email, "Email", 200);
+  if (!EMAIL_PATTERN.test(email)) throw new ApiError(422, "Email 格式不正確。");
+
+  const hireDate = isoDate(body.hireDate, "到職日");
+  const providedTerminationDate = body.terminationDate === undefined
+    || body.terminationDate === null
+    || body.terminationDate === ""
+    ? null
+    : isoDate(body.terminationDate, "離職日");
+  if (status === "inactive" && !providedTerminationDate) {
+    throw new ApiError(422, "離職狀態須填寫離職日。");
+  }
+
+  return {
+    employeeNo: requiredString(body.employeeNo, "員工編號", 50),
+    name: requiredString(body.name, "姓名", 100),
+    email,
+    department: requiredString(body.department, "部門", 100),
+    grade: requiredString(body.grade, "職等", 50),
+    title: requiredString(body.title, "職稱", 100),
+    jobTypeId: requiredString(body.jobTypeId, "職務類型", 100),
+    hireDate,
+    terminationDate: status === "active" ? null : providedTerminationDate,
+    status,
+    salary: nullableSalary(body.salary),
+  };
+}
+
+async function ensureJobType(db: D1Database, jobTypeId: string): Promise<void> {
+  const jobType = await db.prepare("SELECT id FROM job_types WHERE id = ?").bind(jobTypeId).first();
+  if (!jobType) throw new ApiError(422, "找不到指定的職務類型。");
+}
+
+async function assertEmployeeNoAvailable(db: D1Database, employeeNo: string, excludeId?: string): Promise<void> {
+  const existing = excludeId
+    ? await db.prepare("SELECT id FROM employees WHERE employee_no = ? AND id <> ?")
+      .bind(employeeNo, excludeId).first<{ id: string }>()
+    : await db.prepare("SELECT id FROM employees WHERE employee_no = ?")
+      .bind(employeeNo).first<{ id: string }>();
+  if (existing) throw new ApiError(409, `員工編號「${employeeNo}」已被使用。`);
+}
+
+async function assertEmailAvailable(db: D1Database, email: string, excludeId?: string): Promise<void> {
+  const existing = excludeId
+    ? await db.prepare("SELECT id FROM employees WHERE email = ? COLLATE NOCASE AND id <> ?")
+      .bind(email, excludeId).first<{ id: string }>()
+    : await db.prepare("SELECT id FROM employees WHERE email = ? COLLATE NOCASE")
+      .bind(email).first<{ id: string }>();
+  if (existing) throw new ApiError(409, `Email「${email}」已被其他員工使用。`);
+}
+
+async function getEmployeeRecord(db: D1Database, id: string): Promise<EmployeeRecord> {
+  const row = await db.prepare(`
+    SELECT e.id, e.employee_no AS employeeNo, e.name, e.email, e.department, e.grade, e.title,
+           e.job_type_id AS jobTypeId, jt.name AS jobType, e.hire_date AS hireDate,
+           e.termination_date AS terminationDate, e.status, e.salary
+    FROM employees e JOIN job_types jt ON jt.id = e.job_type_id
+    WHERE e.id = ?
+  `).bind(id).first<EmployeeRecord>();
+  if (!row) throw new ApiError(404, "找不到指定員工。");
+  return row;
+}
+
+/** 建立員工主檔（規格 §七 員工管理）。job_type_id 須對應既有值，employee_no／email 須唯一。 */
+async function createEmployee(context: ApiContext): Promise<Response> {
+  const fields = parseEmployee(await parseJson<EmployeeInput>(context.request));
+  await ensureJobType(context.env.DB, fields.jobTypeId);
+  await assertEmployeeNoAvailable(context.env.DB, fields.employeeNo);
+  await assertEmailAvailable(context.env.DB, fields.email);
+  const id = uuid();
+  await context.env.DB.prepare(`
+    INSERT INTO employees (
+      id, employee_no, name, email, department, grade, title, job_type_id,
+      hire_date, termination_date, status, salary
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    id, fields.employeeNo, fields.name, fields.email, fields.department, fields.grade,
+    fields.title, fields.jobTypeId, fields.hireDate, fields.terminationDate, fields.status, fields.salary,
+  ).run();
+  return json({ employee: await getEmployeeRecord(context.env.DB, id) }, 201);
+}
+
+/**
+ * 更新員工主檔。離職透過此端點設定 status='inactive' + terminationDate 完成，
+ * 不提供實體刪除（規格與人資領域慣例：保留歷史關聯，見 enrollments／training_records）。
+ */
+async function updateEmployee(context: ApiContext, id: string): Promise<Response> {
+  const fields = parseEmployee(await parseJson<EmployeeInput>(context.request));
+  await ensureJobType(context.env.DB, fields.jobTypeId);
+  await assertEmployeeNoAvailable(context.env.DB, fields.employeeNo, id);
+  await assertEmailAvailable(context.env.DB, fields.email, id);
+  const result = await context.env.DB.prepare(`
+    UPDATE employees SET employee_no = ?, name = ?, email = ?, department = ?, grade = ?, title = ?,
+      job_type_id = ?, hire_date = ?, termination_date = ?, status = ?, salary = ?,
+      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE id = ?
+  `).bind(
+    fields.employeeNo, fields.name, fields.email, fields.department, fields.grade, fields.title,
+    fields.jobTypeId, fields.hireDate, fields.terminationDate, fields.status, fields.salary, id,
+  ).run();
+  if (result.meta.changes === 0) throw new ApiError(404, "找不到指定員工。");
+  return json({ employee: await getEmployeeRecord(context.env.DB, id) });
+}
 
 interface ImportError {
   row: number;
@@ -1189,9 +1378,12 @@ export async function handleAdminM1(context: ApiContext, path: string): Promise<
   if (!admin) throw new ApiError(401, "請先登入。");
 
   if (path === "/api/admin/employees" && context.request.method === "GET") return listEmployees(context);
+  if (path === "/api/admin/employees" && context.request.method === "POST") return createEmployee(context);
   if (path === "/api/admin/employees/import" && context.request.method === "POST") {
     return importEmployees(context);
   }
+  const employeeMatch = path.match(/^\/api\/admin\/employees\/([^/]+)$/);
+  if (employeeMatch?.[1] && context.request.method === "PATCH") return updateEmployee(context, employeeMatch[1]);
   if (path === "/api/admin/certifications/options" && context.request.method === "GET") {
     return certificationOptions(context);
   }
