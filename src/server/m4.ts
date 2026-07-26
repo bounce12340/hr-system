@@ -1,4 +1,5 @@
-import { ApiError, json, optionalString, requireAdmin } from "./http";
+import { isValidIsoDate, parseCsvTable, parseNonNegativeNumber } from "./csv";
+import { ApiError, json, optionalString, parseJson, requireAdmin, uuid } from "./http";
 import { completionData, taipeiNow } from "./m1";
 import { funnelData } from "./m3";
 import type { ApiContext } from "./types";
@@ -384,6 +385,101 @@ async function salaryCostReport(db: D1Database, filters: ReportFilters) {
   };
 }
 
+const ATTENDANCE_CSV_HEADERS = ["員工編號", "日期", "缺勤時數", "加班時數", "假別", "備註"] as const;
+
+interface ImportError {
+  row: number;
+  message: string;
+}
+
+interface ImportSummary {
+  imported: number;
+  updated: number;
+  skipped: number;
+  errors: ImportError[];
+}
+
+/**
+ * 缺勤加班 CSV 匯入（規格 §五 M4）。
+ * 逐列驗證，任一列失敗只記錄該列錯誤並繼續處理下一列，整批回應固定 200。
+ * 重複匯入（同員工同日期）採「更新」：以既有列為準覆寫時數／假別／備註，並把 source 改回 'csv'。
+ */
+async function importAttendance(context: ApiContext): Promise<Response> {
+  const body = await parseJson<{ csv?: unknown }>(context.request);
+  if (typeof body.csv !== "string" || body.csv.trim() === "") {
+    throw new ApiError(400, "請提供 csv 欄位（CSV 檔案全文字串）。");
+  }
+  const table = parseCsvTable(body.csv, ATTENDANCE_CSV_HEADERS);
+  const db = context.env.DB;
+  const summary: ImportSummary = { imported: 0, updated: 0, skipped: 0, errors: [] };
+
+  for (const row of table.rows) {
+    const employeeNo = row.get("員工編號");
+    const dateText = row.get("日期");
+    const absenceText = row.get("缺勤時數");
+    const overtimeText = row.get("加班時數");
+    const absenceType = row.get("假別");
+    const notes = row.get("備註");
+
+    if (!employeeNo) {
+      summary.errors.push({ row: row.rowNumber, message: "員工編號為必填。" });
+      summary.skipped += 1;
+      continue;
+    }
+    if (!dateText) {
+      summary.errors.push({ row: row.rowNumber, message: "日期為必填。" });
+      summary.skipped += 1;
+      continue;
+    }
+    if (!isValidIsoDate(dateText)) {
+      summary.errors.push({ row: row.rowNumber, message: "日期格式須為 YYYY-MM-DD。" });
+      summary.skipped += 1;
+      continue;
+    }
+    const absenceHours = parseNonNegativeNumber(absenceText, 0);
+    if (absenceHours === null) {
+      summary.errors.push({ row: row.rowNumber, message: "缺勤時數須為非負數字。" });
+      summary.skipped += 1;
+      continue;
+    }
+    const overtimeHours = parseNonNegativeNumber(overtimeText, 0);
+    if (overtimeHours === null) {
+      summary.errors.push({ row: row.rowNumber, message: "加班時數須為非負數字。" });
+      summary.skipped += 1;
+      continue;
+    }
+
+    const employee = await db.prepare(
+      "SELECT id FROM employees WHERE employee_no = ?",
+    ).bind(employeeNo).first<{ id: string }>();
+    if (!employee) {
+      summary.errors.push({ row: row.rowNumber, message: `找不到員工編號「${employeeNo}」的員工資料。` });
+      summary.skipped += 1;
+      continue;
+    }
+
+    const existing = await db.prepare(`
+      SELECT id FROM attendance WHERE employee_id = ? AND attendance_date = ? ORDER BY id LIMIT 1
+    `).bind(employee.id, dateText).first<{ id: string }>();
+
+    if (existing) {
+      await db.prepare(`
+        UPDATE attendance SET absence_hours = ?, overtime_hours = ?, absence_type = ?, source = 'csv', notes = ?
+        WHERE id = ?
+      `).bind(absenceHours, overtimeHours, absenceType || null, notes, existing.id).run();
+      summary.updated += 1;
+    } else {
+      await db.prepare(`
+        INSERT INTO attendance (id, employee_id, attendance_date, absence_hours, overtime_hours, absence_type, source, notes)
+        VALUES (?, ?, ?, ?, ?, ?, 'csv', ?)
+      `).bind(uuid(), employee.id, dateText, absenceHours, overtimeHours, absenceType || null, notes).run();
+      summary.imported += 1;
+    }
+  }
+
+  return json(summary);
+}
+
 async function report(
   context: ApiContext,
   build: (db: D1Database, filters: ReportFilters) => Promise<unknown>,
@@ -412,7 +508,12 @@ async function summaryReport(context: ApiContext): Promise<Response> {
 export async function handleAdminM4(context: ApiContext, path: string): Promise<Response | null> {
   requireAdmin(context.user);
   const base = "/api/admin/reports";
-  if (!path.startsWith(base) || context.request.method !== "GET") return null;
+  if (!path.startsWith(base)) return null;
+
+  if (path === `${base}/attendance/import` && context.request.method === "POST") {
+    return importAttendance(context);
+  }
+  if (context.request.method !== "GET") return null;
 
   if (path === `${base}/headcount`) return report(context, headcountReport);
   if (path === `${base}/turnover`) return report(context, turnoverReport);

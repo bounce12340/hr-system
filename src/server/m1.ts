@@ -1,3 +1,4 @@
+import { isValidIsoDate, parseCsvTable, parseNonNegativeInteger } from "./csv";
 import {
   ApiError,
   json,
@@ -888,6 +889,128 @@ async function listEmployees(context: ApiContext): Promise<Response> {
   return json({ employees });
 }
 
+const EMPLOYEE_CSV_HEADERS = [
+  "員工編號", "姓名", "Email", "部門", "職等", "職稱", "職務類型", "到職日", "薪資",
+] as const;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+interface ImportError {
+  row: number;
+  message: string;
+}
+
+interface ImportSummary {
+  imported: number;
+  updated: number;
+  skipped: number;
+  errors: ImportError[];
+}
+
+/**
+ * 員工主檔 CSV 匯入（規格 §九）。以員工編號判斷新建或更新，逐列驗證失敗只記錄錯誤並繼續，
+ * 整批回應固定 200。掛在本模組（`src/server/m1.ts`）是因為既有 `/api/admin/employees`
+ * GET（見下方 handleAdminM1）已經是本檔在維護，員工主檔目前沒有其他專屬模組。
+ */
+async function importEmployees(context: ApiContext): Promise<Response> {
+  const body = await parseJson<{ csv?: unknown }>(context.request);
+  if (typeof body.csv !== "string" || body.csv.trim() === "") {
+    throw new ApiError(400, "請提供 csv 欄位（CSV 檔案全文字串）。");
+  }
+  const table = parseCsvTable(body.csv, EMPLOYEE_CSV_HEADERS);
+  const db = context.env.DB;
+  const summary: ImportSummary = { imported: 0, updated: 0, skipped: 0, errors: [] };
+
+  for (const row of table.rows) {
+    const employeeNo = row.get("員工編號");
+    const name = row.get("姓名");
+    const email = row.get("Email");
+    const department = row.get("部門");
+    const grade = row.get("職等");
+    const title = row.get("職稱");
+    const jobTypeName = row.get("職務類型");
+    const hireDate = row.get("到職日");
+    const salaryText = row.get("薪資");
+
+    const requiredFields: Array<[string, string]> = [
+      ["員工編號", employeeNo],
+      ["姓名", name],
+      ["Email", email],
+      ["部門", department],
+      ["職等", grade],
+      ["職稱", title],
+      ["職務類型", jobTypeName],
+      ["到職日", hireDate],
+    ];
+    const missingField = requiredFields.find(([, value]) => value === "");
+    if (missingField) {
+      summary.errors.push({ row: row.rowNumber, message: `${missingField[0]}為必填。` });
+      summary.skipped += 1;
+      continue;
+    }
+    if (!EMAIL_PATTERN.test(email)) {
+      summary.errors.push({ row: row.rowNumber, message: "Email 格式不正確。" });
+      summary.skipped += 1;
+      continue;
+    }
+    if (!isValidIsoDate(hireDate)) {
+      summary.errors.push({ row: row.rowNumber, message: "到職日格式須為 YYYY-MM-DD。" });
+      summary.skipped += 1;
+      continue;
+    }
+    const salary = parseNonNegativeInteger(salaryText, null);
+    if (salary === null && salaryText !== "") {
+      summary.errors.push({ row: row.rowNumber, message: "薪資須為非負整數。" });
+      summary.skipped += 1;
+      continue;
+    }
+
+    const jobType = await db.prepare(
+      "SELECT id FROM job_types WHERE name = ?",
+    ).bind(jobTypeName).first<{ id: string }>();
+    if (!jobType) {
+      summary.errors.push({ row: row.rowNumber, message: `找不到職務類型「${jobTypeName}」。` });
+      summary.skipped += 1;
+      continue;
+    }
+
+    const emailConflict = await db.prepare(`
+      SELECT employee_no AS employeeNo FROM employees WHERE email = ? COLLATE NOCASE AND employee_no <> ?
+    `).bind(email, employeeNo).first<{ employeeNo: string }>();
+    if (emailConflict) {
+      summary.errors.push({
+        row: row.rowNumber,
+        message: `Email 已被員工編號「${emailConflict.employeeNo}」使用。`,
+      });
+      summary.skipped += 1;
+      continue;
+    }
+
+    const existing = await db.prepare(
+      "SELECT id FROM employees WHERE employee_no = ?",
+    ).bind(employeeNo).first<{ id: string }>();
+
+    if (existing) {
+      await db.prepare(`
+        UPDATE employees SET name = ?, email = ?, department = ?, grade = ?, title = ?,
+          job_type_id = ?, hire_date = ?, salary = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE id = ?
+      `).bind(name, email, department, grade, title, jobType.id, hireDate, salary, existing.id).run();
+      summary.updated += 1;
+    } else {
+      await db.prepare(`
+        INSERT INTO employees (
+          id, employee_no, name, email, department, grade, title, job_type_id, hire_date, salary
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        uuid(), employeeNo, name, email, department, grade, title, jobType.id, hireDate, salary,
+      ).run();
+      summary.imported += 1;
+    }
+  }
+
+  return json(summary);
+}
+
 async function certificationOptions(context: ApiContext): Promise<Response> {
   const result = await context.env.DB.prepare(`
     SELECT id, name FROM certifications WHERE active = 1 ORDER BY name
@@ -1066,6 +1189,9 @@ export async function handleAdminM1(context: ApiContext, path: string): Promise<
   if (!admin) throw new ApiError(401, "請先登入。");
 
   if (path === "/api/admin/employees" && context.request.method === "GET") return listEmployees(context);
+  if (path === "/api/admin/employees/import" && context.request.method === "POST") {
+    return importEmployees(context);
+  }
   if (path === "/api/admin/certifications/options" && context.request.method === "GET") {
     return certificationOptions(context);
   }
