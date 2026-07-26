@@ -6,9 +6,21 @@ interface LoginPageProps {
   onAuthenticated: (user: User) => void;
 }
 
+/**
+ * 是否為本機開發環境。
+ *
+ * demo 帳密的預填與提示只在本機出現：部署後的站台是公開可存取的，若在登入頁
+ * 預填或標示管理者帳密，等於任何取得網址的人都能直接進入管理後台。
+ */
+function isLocalDevHost(): boolean {
+  const host = window.location.hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost");
+}
+
 export function LoginPage({ onAuthenticated }: LoginPageProps) {
-  const [email, setEmail] = useState("admin@demo.local");
-  const [password, setPassword] = useState("Demo1234!");
+  const localDev = isLocalDevHost();
+  const [email, setEmail] = useState(localDev ? "admin@demo.local" : "");
+  const [password, setPassword] = useState(localDev ? "Demo1234!" : "");
   const [pendingUser, setPendingUser] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -78,7 +90,9 @@ export function LoginPage({ onAuthenticated }: LoginPageProps) {
             <button class="primary" disabled={loading}>{loading ? "更新中…" : "更新密碼並進入"}</button>
           </form>
         )}
-        {!pendingUser && <p class="demo-hint">Demo admin：admin@demo.local／Demo1234!</p>}
+        {!pendingUser && localDev && (
+          <p class="demo-hint">Demo admin：admin@demo.local／Demo1234!</p>
+        )}
       </section>
       <aside class="login-visual">
         <p>Learning operations</p>

@@ -8,20 +8,15 @@
     {
       "binding": "DB",
       "database_name": "hr-system",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "3bf2f250-8eb5-4774-bbf4-ab079d28e18f",
       "preview_database_id": "DB",
       "migrations_dir": "./migrations"
     }
-  ],
-  "observability": {
-    "enabled": true,
-    "logs": {
-      "enabled": true,
-      "head_sampling_rate": 1
-    },
-    "traces": {
-      "enabled": true,
-      "head_sampling_rate": 0.1
-    }
-  }
+  ]
+
+  // 註：不要在此加入 "observability" 區段。該設定僅 Workers 專案支援，
+  // Pages 專案會在 `wrangler pages deploy` 時以
+  // 「Configuration file for Pages projects does not support "observability"」
+  // 直接中止部署。本機 `wrangler pages dev` 不會檢查這項，因此只有真正部署
+  // 才會浮現。Pages Functions 的日誌請改由 Cloudflare Dashboard 開啟。
 }
