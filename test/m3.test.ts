@@ -172,6 +172,47 @@ describe("M3 招募 CRUD、權限與提醒", () => {
     expect(archived.response.status).toBe(200);
   });
 
+  // 離職員工的試用期已無需追蹤，提醒不應再出現。證照提醒（src/server/m2.ts:211）
+  // 與必修指派早已有 status = 'active' 過濾，此處補上同樣的一致性保證。
+  it("離職員工的試用期不出現在提醒中", async () => {
+    // 明確設定提醒天數，讓提醒視窗不受測試執行順序影響。
+    await call("/api/admin/recruitment/probation-settings", adminJson("PATCH", { reminderDays: 30 }));
+
+    // 到期日落在提醒視窗內（25 天後），確保兩筆都「有資格」進提醒，
+    // 唯一差別只剩在職狀態。
+    const start = new Date();
+    start.setUTCDate(start.getUTCDate() - 65);
+    const startDate = start.toISOString().slice(0, 10);
+
+    async function createProbation(employeeId: string): Promise<string> {
+      const created = await call<{ id: string }>(
+        "/api/admin/recruitment/probations",
+        adminJson("POST", {
+          employeeId,
+          candidateApplicationId: null,
+          startDate,
+          durationDays: 90,
+          result: null,
+          notes: "離職過濾測試",
+        }),
+      );
+      expect(created.response.status).toBe(201);
+      return created.body.data?.id ?? "";
+    }
+
+    const inactiveId = await createProbation("emp-011"); // 0007 標記為離職
+    const activeId = await createProbation("emp-012"); // 在職，作為對照組
+
+    const dashboard = await call<{
+      probationReminders: Array<{ id: string }>;
+    }>("/api/admin/dashboard", { headers: { Cookie: adminCookie } });
+    const reminderIds = dashboard.body.data?.probationReminders.map((item) => item.id) ?? [];
+
+    // 對照組必須出現，否則代表提醒視窗設錯，這條測試就驗不到 status 過濾。
+    expect(reminderIds).toContain(activeId);
+    expect(reminderIds).not.toContain(inactiveId);
+  });
+
   it("試用期依到職日計算到期日，設定天數內同時出現在試用期與管理儀表板提醒", async () => {
     const settings = await call(
       "/api/admin/recruitment/probation-settings",

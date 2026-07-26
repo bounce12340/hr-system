@@ -1120,7 +1120,8 @@ export async function probationReminders(db: D1Database): Promise<ProbationRemin
            CAST(julianday(p.due_date) - julianday(date('now')) AS INTEGER) AS daysUntilDue
     FROM probations p
     JOIN employees e ON e.id = p.employee_id
-    WHERE p.result IS NULL
+    WHERE e.status = 'active'
+      AND p.result IS NULL
       AND date(p.due_date) <= date('now', '+' || ? || ' day')
     ORDER BY date(p.due_date), e.employee_no
   `).bind(reminderDays).all<ProbationReminderRow>();
