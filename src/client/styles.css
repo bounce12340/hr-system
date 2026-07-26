@@ -289,6 +289,19 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
 .probation-facts dt { color: var(--muted); font-size: .68rem; }
 .probation-facts dd { margin: .2rem 0 0; font-size: .8rem; font-weight: 700; }
 
+.report-filter-bar { display: flex; flex-wrap: wrap; gap: .8rem; align-items: flex-end; padding: 1rem 1.1rem; margin-bottom: 1.3rem; background: var(--paper); border: 1px solid var(--line); border-radius: 13px; }
+.report-filter-bar label { flex: 1 1 160px; min-width: 140px; }
+.report-stack { display: grid; gap: 1.3rem; min-width: 0; }
+.report-card { background: var(--paper); border: 1px solid var(--line); border-radius: 13px; box-shadow: 0 6px 24px rgba(25,54,49,.04); padding: 1.2rem; min-width: 0; }
+.report-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.report-card-head p { margin: 0; color: var(--muted); font-size: .82rem; }
+.report-export { display: flex; gap: .5rem; flex: 0 0 auto; }
+.chart-frame { position: relative; width: 100%; min-width: 0; }
+.chart-frame canvas { max-width: 100%; }
+.chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.2rem; }
+.chart-block { min-width: 0; }
+.chart-block h3 { font-size: .8rem; font-weight: 700; color: var(--muted); margin-bottom: .6rem; }
+
 @media (max-width: 900px) {
   .app-shell { display: block; }
   .sidebar { display: none; }
@@ -310,7 +323,7 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
   .page-heading { display: grid; }
   .page-heading > button { width: 100%; }
   .form-grid, .assignment-list { grid-template-columns: 1fr; }
-  .metric-row { grid-template-columns: 1fr 1fr; }
+  .metric-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .calendar { min-width: 100%; grid-template-columns: repeat(7, minmax(0, 1fr)); }
   .calendar-day { min-height: 92px; padding: 3px; }
   .calendar-event, .special-label { font-size: 0; min-height: 14px; padding: 2px; }
@@ -336,4 +349,10 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
   .probation-facts { grid-template-columns: repeat(2, 1fr); }
   .inline-action { align-items: stretch; flex-direction: column; }
   .inline-action button { width: 100%; }
+  .report-filter-bar { flex-direction: column; align-items: stretch; }
+  .report-filter-bar label { min-width: 0; }
+  .report-card-head { flex-direction: column; align-items: stretch; }
+  .report-export { width: 100%; }
+  .report-export button { flex: 1; }
+  .chart-grid { grid-template-columns: 1fr; }
 }
