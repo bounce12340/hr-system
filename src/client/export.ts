@@ -223,27 +223,5 @@ export function buildCsv(rows: readonly SheetRow[]): string {
   return `﻿${body}`;
 }
 
-// --- 下載 ------------------------------------------------------------------
-
-function triggerDownload(filename: string, blob: Blob): void {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-export function exportCsv(filename: string, rows: readonly SheetRow[]): void {
-  triggerDownload(filename, new Blob([buildCsv(rows)], { type: "text/csv;charset=utf-8" }));
-}
-
-export function exportXlsx(filename: string, sheetName: string, rows: readonly SheetRow[]): void {
-  const bytes = buildXlsx(sheetName, rows);
-  const blob = new Blob([bytes as unknown as BlobPart], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-  triggerDownload(filename, blob);
-}
+// 觸發瀏覽器下載的部分刻意放在 download.ts：本檔維持純運算、不碰 DOM，
+// 才能被 Workers 型別環境下的測試直接匯入（tsconfig.test.json 不含 dom lib）。
