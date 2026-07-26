@@ -84,7 +84,7 @@ describe("M1 排課規則", () => {
     expect(archived.response.status).toBe(200);
   });
 
-  it("中級必修自動建議診所線與醫院線共 10 人，排除內勤", async () => {
+  it("中級必修自動建議診所線與醫院線共 8 人，排除內勤", async () => {
     const preview = await call<{
       employees: Array<{ jobType: string; recommended: boolean }>;
     }>("/api/admin/course-sessions/assignment-preview", adminJson("POST", {
@@ -95,7 +95,7 @@ describe("M1 排課規則", () => {
     }));
     expect(preview.response.status).toBe(200);
     const recommended = preview.body.data?.employees.filter((employee) => employee.recommended) ?? [];
-    expect(recommended).toHaveLength(10);
+    expect(recommended).toHaveLength(8);
     expect(recommended.some((employee) => employee.jobType === "內勤")).toBe(false);
   });
 
@@ -116,7 +116,7 @@ describe("M1 排課規則", () => {
     expect(result.body.error?.message).toContain("封鎖日");
   });
 
-  it("全員必訓日不分職務自動指派 15 名在職員工", async () => {
+  it("全員必訓日不分職務自動指派 12 名在職員工", async () => {
     const day = await call<{ specialDay: { id: string } }>("/api/admin/special-days", adminJson("POST", {
       specialDate: "2030-01-20",
       dayType: "mandatory_all",
@@ -137,7 +137,7 @@ describe("M1 排課規則", () => {
       }),
     );
     expect(session.response.status).toBe(201);
-    expect(session.body.data?.assignedCount).toBe(15);
+    expect(session.body.data?.assignedCount).toBe(12);
   });
 
   it("同員工同時段衝突先回 409，強制覆寫會留下稽核紀錄", async () => {

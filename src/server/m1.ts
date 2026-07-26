@@ -677,7 +677,7 @@ async function cancelSession(context: ApiContext, id: string): Promise<Response>
   return json({ id, cancelled: true });
 }
 
-function taipeiNow(): string {
+export function taipeiNow(): string {
   const parts = new Intl.DateTimeFormat("sv-SE", {
     timeZone: "Asia/Taipei",
     year: "numeric",
@@ -789,6 +789,7 @@ interface CompletionEmployee {
   employeeNo: string;
   name: string;
   department: string;
+  grade: string;
   jobType: string;
   requiredLevel: number;
 }
@@ -799,34 +800,63 @@ interface RequiredCourse {
   competencyLevel: number;
 }
 
-async function completionData(db: D1Database, department?: string, employeeId?: string): Promise<unknown[]> {
+export interface CompletionRow extends CompletionEmployee {
+  requiredCount: number;
+  completedCount: number;
+  completionRate: number;
+  missingCourses: RequiredCourse[];
+}
+
+/** M4 報表需要職等與「截至某日」的完成狀態，故以選項物件取代位置參數。 */
+export interface CompletionFilters {
+  department?: string | null;
+  employeeId?: string | null;
+  grade?: string | null;
+  /** 只採計此日期（不含）之前完成的訓練紀錄，用於「截至期末」口徑。 */
+  completedBefore?: string | null;
+}
+
+export async function completionData(
+  db: D1Database,
+  filters: CompletionFilters = {},
+): Promise<CompletionRow[]> {
   const conditions = ["e.status = 'active'"];
   const bindings: string[] = [];
-  if (department) {
+  if (filters.department) {
     conditions.push("e.department = ?");
-    bindings.push(department);
+    bindings.push(filters.department);
   }
-  if (employeeId) {
+  if (filters.grade) {
+    conditions.push("e.grade = ?");
+    bindings.push(filters.grade);
+  }
+  if (filters.employeeId) {
     conditions.push("e.id = ?");
-    bindings.push(employeeId);
+    bindings.push(filters.employeeId);
   }
   const employees = await db.prepare(`
-    SELECT e.id, e.employee_no AS employeeNo, e.name, e.department,
+    SELECT e.id, e.employee_no AS employeeNo, e.name, e.department, e.grade,
            jt.name AS jobType, jt.required_level AS requiredLevel
     FROM employees e JOIN job_types jt ON jt.id = e.job_type_id
     WHERE ${conditions.join(" AND ")}
     ORDER BY e.department, e.employee_no
   `).bind(...bindings).all<CompletionEmployee>();
+  const recordStatement = filters.completedBefore
+    ? db.prepare(`
+      SELECT DISTINCT employee_id AS employeeId, course_id AS courseId
+      FROM training_records WHERE completed_at < ?
+    `).bind(filters.completedBefore)
+    : db.prepare(`
+      SELECT DISTINCT employee_id AS employeeId, course_id AS courseId
+      FROM training_records
+    `);
   const [courses, records] = await Promise.all([
     db.prepare(`
       SELECT id, name, competency_level AS competencyLevel
       FROM courses WHERE active = 1 AND course_type = 'mandatory'
       ORDER BY competency_level, name
     `).all<RequiredCourse>(),
-    db.prepare(`
-      SELECT DISTINCT employee_id AS employeeId, course_id AS courseId
-      FROM training_records
-    `).all<{ employeeId: string; courseId: string }>(),
+    recordStatement.all<{ employeeId: string; courseId: string }>(),
   ]);
   const completed = new Set(records.results.map((record) => `${record.employeeId}:${record.courseId}`));
   return employees.results.map((employee) => {
@@ -846,7 +876,7 @@ async function completionData(db: D1Database, department?: string, employeeId?: 
 
 async function completionTracking(context: ApiContext): Promise<Response> {
   const department = context.url.searchParams.get("department") || undefined;
-  const employees = await completionData(context.env.DB, department);
+  const employees = await completionData(context.env.DB, { department });
   const departments = await context.env.DB.prepare(`
     SELECT DISTINCT department FROM employees WHERE status = 'active' ORDER BY department
   `).all<{ department: string }>();
@@ -1026,7 +1056,7 @@ async function employeeTrainingRecords(
       JOIN course_sessions cs ON cs.id = tr.course_session_id
       WHERE tr.employee_id = ? ORDER BY tr.completed_at DESC
     `).bind(user.employeeId).all(),
-    completionData(context.env.DB, undefined, user.employeeId),
+    completionData(context.env.DB, { employeeId: user.employeeId }),
   ]);
   return json({ records: records.results, completion: completion[0] ?? null });
 }

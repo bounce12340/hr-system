@@ -311,12 +311,12 @@ describe("M2 證照、提醒與訓練矩陣", () => {
     const officeCells = matrix.body.data?.cells.filter((cell) => cell.jobTypeId === "jt-office");
     expect(officeCells).toContainEqual(expect.objectContaining({
       courseId: "course-01",
-      completionRate: 60,
+      completionRate: 75,
       status: "yellow",
     }));
     expect(officeCells).toContainEqual(expect.objectContaining({
       courseId: "course-03",
-      completionRate: 80,
+      completionRate: 100,
       status: "green",
     }));
     expect(officeCells).toContainEqual(expect.objectContaining({

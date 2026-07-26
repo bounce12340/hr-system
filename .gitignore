@@ -11,3 +11,5 @@ coverage/
 scratch_*
 .playwright-mcp/
 
+# Agent 交接筆記
+.notes-*

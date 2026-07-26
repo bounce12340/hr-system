@@ -592,27 +592,70 @@ async function applicationHistory(context: ApiContext, id: string): Promise<Resp
   return json({ history: result.results });
 }
 
-async function funnelStats(context: ApiContext): Promise<Response> {
+/** M4 報表以部門與投遞期間篩選漏斗；未帶篩選時等同 M3 原本的全量統計。 */
+export interface FunnelFilters {
+  department?: string | null;
+  /** 依應徵投遞時間（applied_at）界定期間，起日含、迄日不含。 */
+  appliedFrom?: string | null;
+  appliedBefore?: string | null;
+}
+
+export interface FunnelStage {
+  stage: PipelineStage;
+  label: string;
+  currentCount: number;
+  enteredCount: number;
+}
+
+export interface FunnelResult {
+  stages: FunnelStage[];
+  rejectedCount: number;
+}
+
+export async function funnelData(db: D1Database, filters: FunnelFilters = {}): Promise<FunnelResult> {
+  const conditions: string[] = [];
+  const bindings: string[] = [];
+  if (filters.department) {
+    conditions.push("jo.department = ?");
+    bindings.push(filters.department);
+  }
+  if (filters.appliedFrom) {
+    conditions.push("ca.applied_at >= ?");
+    bindings.push(filters.appliedFrom);
+  }
+  if (filters.appliedBefore) {
+    conditions.push("ca.applied_at < ?");
+    bindings.push(filters.appliedBefore);
+  }
+  const scope = conditions.length > 0 ? ` AND ${conditions.join(" AND ")}` : "";
+  const source = `
+    FROM candidate_applications ca
+    JOIN job_openings jo ON jo.id = ca.job_opening_id
+  `;
   const [current, entered, rejected] = await Promise.all([
-    context.env.DB.prepare(`
-      SELECT status, COUNT(*) AS count
-      FROM candidate_applications
-      WHERE status <> 'rejected'
-      GROUP BY status
-    `).all<{ status: PipelineStage; count: number }>(),
-    context.env.DB.prepare(`
-      SELECT to_status AS status, COUNT(DISTINCT application_id) AS count
-      FROM candidate_application_status_history
-      WHERE to_status <> 'rejected'
-      GROUP BY to_status
-    `).all<{ status: PipelineStage; count: number }>(),
-    context.env.DB.prepare(`
-      SELECT COUNT(*) AS count FROM candidate_applications WHERE status = 'rejected'
-    `).first<{ count: number }>(),
+    db.prepare(`
+      SELECT ca.status, COUNT(*) AS count
+      ${source}
+      WHERE ca.status <> 'rejected'${scope}
+      GROUP BY ca.status
+    `).bind(...bindings).all<{ status: PipelineStage; count: number }>(),
+    db.prepare(`
+      SELECT h.to_status AS status, COUNT(DISTINCT h.application_id) AS count
+      FROM candidate_application_status_history h
+      JOIN candidate_applications ca ON ca.id = h.application_id
+      JOIN job_openings jo ON jo.id = ca.job_opening_id
+      WHERE h.to_status <> 'rejected'${scope}
+      GROUP BY h.to_status
+    `).bind(...bindings).all<{ status: PipelineStage; count: number }>(),
+    db.prepare(`
+      SELECT COUNT(*) AS count
+      ${source}
+      WHERE ca.status = 'rejected'${scope}
+    `).bind(...bindings).first<{ count: number }>(),
   ]);
   const currentCounts = new Map(current.results.map((row) => [row.status, row.count]));
   const enteredCounts = new Map(entered.results.map((row) => [row.status, row.count]));
-  return json({
+  return {
     stages: PIPELINE_STAGES.map((stage) => ({
       stage,
       label: STAGE_LABELS[stage],
@@ -620,7 +663,11 @@ async function funnelStats(context: ApiContext): Promise<Response> {
       enteredCount: enteredCounts.get(stage) ?? 0,
     })),
     rejectedCount: rejected?.count ?? 0,
-  });
+  };
+}
+
+async function funnelStats(context: ApiContext): Promise<Response> {
+  return json(await funnelData(context.env.DB));
 }
 
 function parseInterview(body: InterviewInput) {
