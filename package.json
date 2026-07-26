@@ -12,6 +12,7 @@
     "wrangler:check": "wrangler pages functions build functions --outdir .wrangler/functions-build --project-directory .",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrations:list": "wrangler d1 migrations list DB --local",
+    "db:reset:local": "node scripts/reset-local-db.mjs",
     "deploy": "npm run build && wrangler pages deploy dist --project-name hr-system"
   },
   "dependencies": {

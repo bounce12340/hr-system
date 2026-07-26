@@ -23,7 +23,28 @@ npm run dev
 - Employee：`chiahao.lin@demo.local`（其他員工帳號請見 seed）
 - 初始密碼：`Demo1234!`
 
-所有 seed 帳號首次登入都必須變更密碼。
+所有 seed 帳號首次登入都必須變更密碼（規格要求，見「設計決定」）。
+
+### 本機實測的密碼約定
+
+強制首次改密碼會帶來一個實務問題：**改過的密碼沒有找回途徑**。若在本機實測時改了密碼卻沒留存，下一次（或下一位開發者）就登不進去。
+
+因此本專案約定：
+
+- 本機實測一律把 demo 帳號的新密碼設為 **`AcceptDemo2026!`**
+- 忘記或登不進去時，不要嘗試猜密碼，直接重置本機資料庫：
+
+```bash
+npm run db:reset:local
+```
+
+該指令會刪除 `.wrangler/state/v3/d1` 並重跑所有 migration，取回乾淨的種子資料（初始密碼回到 `Demo1234!`）。**它只動本機模擬狀態，不會碰到任何遠端資料庫。**
+
+若執行時出現 `EPERM／Permission denied`，代表本機 D1 檔案仍被佔用。請先關閉正在執行的 `wrangler pages dev`；Windows 上有時 `workerd` 程序會殘留，需另外終止：
+
+```bash
+powershell -Command "Get-Process workerd -ErrorAction SilentlyContinue | Stop-Process -Force"
+```
 
 ## 常用指令
 
@@ -34,6 +55,7 @@ npm test                       # Workers runtime + 真實 D1 binding 測試
 npm run wrangler:check         # 編譯 Pages Functions
 npm run db:migrations:list     # 查詢本機待套 migration
 npm run db:migrate:local       # 套用本機 D1 migration
+npm run db:reset:local         # 重置本機 D1 並重跑 migration（只動本機）
 ```
 
 ## 建立 D1 與部署
