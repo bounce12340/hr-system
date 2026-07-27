@@ -57,7 +57,11 @@ interface SalaryRow {
   missingSalary: number;
 }
 
-/** 某日仍在職：到職日已到，且尚未離職（離職當日仍計為在職）。 */
+/**
+ * 某日仍在職：到職日已到（含當日），且離職日尚未到達。
+ * 條件為 `termination_date > ?`，因此**離職當日即不計入在職**——當日已是最後一天在職，
+ * 隔日起才生效的語意會讓期末人數與 HR 認知不同，此處採「離職日當天出列」。
+ */
 const ACTIVE_AS_OF = "e.hire_date <= ? AND (e.termination_date IS NULL OR e.termination_date > ?)";
 
 function monthParam(value: string | null, label: string): string | null {

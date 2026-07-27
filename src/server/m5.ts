@@ -47,6 +47,18 @@ const IDP_ITEM_STATUS_LABELS: Record<IdpItemStatus, string> = {
   completed: "已完成",
 };
 
+/**
+ * 判斷是否為唯一鍵衝突。
+ *
+ * 存在理由：先前這裡是裸 `catch`，把任何寫入失敗都轉成「已存在」的 409。連線中斷、
+ * 欄位型別錯誤、schema 不符都會被偽裝成重複資料，除錯時會被導向完全錯誤的方向。
+ * 只有確認是唯一鍵衝突才轉 409，其餘原樣拋出，讓真正的錯誤浮上來。
+ */
+function isUniqueViolation(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("UNIQUE constraint failed");
+}
+
 function scoreLabel(value: number): string {
   if (value === 1) return "低";
   if (value === 2) return "中";
@@ -258,7 +270,8 @@ async function createCompetency(context: ApiContext): Promise<Response> {
       competency.requiredLevel,
       competency.description,
     ).run();
-  } catch {
+  } catch (caught) {
+    if (!isUniqueViolation(caught)) throw caught;
     throw new ApiError(409, "此職位已有相同職能項目。");
   }
   return json({ id, ...competency }, 201);
@@ -320,6 +333,10 @@ async function listNineGrid(context: ApiContext): Promise<Response> {
     ORDER BY e.department, e.employee_no
   `).all<NineGridRow>();
   return json({
+    // scale 是完整的 1～3 刻度對照，與 grid 內容無關。前端若改以現有資料反推標籤，
+    // 沒有員工落在某一級時該級就會缺對照；全新環境 nine_grid 為空時更會整個軸失去
+    // 標題，看不出哪軸是績效、哪軸是潛力。刻度是固定語意，必須由後端明確供給。
+    scale: [1, 2, 3].map((value) => ({ value, label: scoreLabel(value) })),
     grid: result.results.map((row) => ({
       ...row,
       performanceLabel: row.performance === null ? null : scoreLabel(row.performance),
@@ -458,7 +475,8 @@ async function createSuccessor(context: ApiContext, keyPositionId: string): Prom
       INSERT INTO successors (id, key_position_id, employee_id, readiness, notes)
       VALUES (?, ?, ?, ?, ?)
     `).bind(id, keyPositionId, successor.employeeId, successor.readiness, successor.notes).run();
-  } catch {
+  } catch (caught) {
+    if (!isUniqueViolation(caught)) throw caught;
     throw new ApiError(409, "此員工已是該職位的繼任者。");
   }
   return json(

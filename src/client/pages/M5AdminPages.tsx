@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { api, jsonBody } from "../api";
 import type { Employee } from "../types";
 
 // ---- 後端回傳型別，對應 src/server/m5.ts（base /api/admin/talent）----
-// 注意：performance／potential／readiness 的中文標籤一律取自後端回傳欄位
-// （performanceLabel／potentialLabel／readinessLabel），前端不建立對照表；
-// 若後端尚未提供某個數值的標籤樣本（例如尚無人落點），畫面會退回顯示原始代碼。
+// performance／potential／readiness 的中文標籤一律取自後端，前端不建立對照表。
+// 九宮格的軸標題與落點下拉改用後端提供的 scale（完整 1～3 刻度），而非從現有
+// 落點資料反推——反推會在某一級無人時缺標籤，全新環境更會讓兩軸標題全部退化。
 
 type TalentSection = "competencies" | "nine-grid" | "key-positions" | "idp";
 
@@ -210,6 +210,9 @@ const POTENTIAL_LEVELS = [3, 2, 1];
 
 function NineGridPage() {
   const [entries, setEntries] = useState<NineGridEntry[]>([]);
+  // 1～3 的完整刻度對照，由後端提供。不可改以現有資料反推：某一級沒有員工時該級
+  // 就會缺標籤，全新環境更會讓兩軸標題全部退化成「等級 N」，看不出哪軸是績效。
+  const [scale, setScale] = useState<Array<{ value: number; label: string }>>([]);
   const [target, setTarget] = useState<NineGridEntry | null>(null);
   const [form, setForm] = useState({ performance: 2, potential: 2, reviewPeriod: `${currentYear()}年度`, notes: "" });
   const [message, setMessage] = useState("");
@@ -217,24 +220,21 @@ function NineGridPage() {
 
   async function load() {
     try {
-      const data = await api<{ grid: NineGridEntry[] }>("/api/admin/talent/nine-grid");
+      const data = await api<{
+        grid: NineGridEntry[];
+        scale: Array<{ value: number; label: string }>;
+      }>("/api/admin/talent/nine-grid");
       setEntries(data.grid);
+      setScale(data.scale);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "無法讀取九宮格資料。");
     }
   }
   useEffect(() => { void load(); }, []);
 
-  const performanceLabels = useMemo(() => {
-    const map: Record<number, string> = {};
-    for (const entry of entries) if (entry.performance !== null && entry.performanceLabel) map[entry.performance] = entry.performanceLabel;
-    return map;
-  }, [entries]);
-  const potentialLabels = useMemo(() => {
-    const map: Record<number, string> = {};
-    for (const entry of entries) if (entry.potential !== null && entry.potentialLabel) map[entry.potential] = entry.potentialLabel;
-    return map;
-  }, [entries]);
+  const scaleLabel = (value: number): string =>
+    scale.find((item) => item.value === value)?.label ?? `等級 ${value}`;
+
 
   function openModal(entry: NineGridEntry) {
     setTarget(entry);
@@ -273,11 +273,11 @@ function NineGridPage() {
         <div class="nine-grid">
           <div class="nine-grid-corner">潛力 ＼ 績效</div>
           {PERFORMANCE_LEVELS.map((performance) => (
-            <div class="nine-grid-header" key={`ph-${performance}`}>{performanceLabels[performance] ?? `等級 ${performance}`}</div>
+            <div class="nine-grid-header" key={`ph-${performance}`}>{scaleLabel(performance)}</div>
           ))}
           {POTENTIAL_LEVELS.map((potential) => (
             <>
-              <div class="nine-grid-header" key={`pot-${potential}`}>{potentialLabels[potential] ?? `等級 ${potential}`}</div>
+              <div class="nine-grid-header" key={`pot-${potential}`}>{scaleLabel(potential)}</div>
               {PERFORMANCE_LEVELS.map((performance) => {
                 const cellEmployees = entries.filter((entry) => entry.performance === performance && entry.potential === potential);
                 return (
@@ -337,10 +337,10 @@ function NineGridPage() {
             <form onSubmit={(event) => void savePlacement(event)}>
               <div class="form-grid">
                 <label>績效<select value={form.performance} onChange={(event) => setForm({ ...form, performance: Number(event.currentTarget.value) })}>
-                  {PERFORMANCE_LEVELS.map((level) => <option value={level}>{performanceLabels[level] ?? `等級 ${level}`}</option>)}
+                  {PERFORMANCE_LEVELS.map((level) => <option value={level}>{scaleLabel(level)}</option>)}
                 </select></label>
                 <label>潛力<select value={form.potential} onChange={(event) => setForm({ ...form, potential: Number(event.currentTarget.value) })}>
-                  {POTENTIAL_LEVELS.map((level) => <option value={level}>{potentialLabels[level] ?? `等級 ${level}`}</option>)}
+                  {POTENTIAL_LEVELS.map((level) => <option value={level}>{scaleLabel(level)}</option>)}
                 </select></label>
                 <label class="full">評核期間<input value={form.reviewPeriod} onInput={(event) => setForm({ ...form, reviewPeriod: event.currentTarget.value })} required /></label>
                 <label class="full">備註<textarea value={form.notes} onInput={(event) => setForm({ ...form, notes: event.currentTarget.value })} /></label>
