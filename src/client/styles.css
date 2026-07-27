@@ -283,9 +283,10 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
 .home-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 1rem; align-items: start; }
 .certification-card small { margin-top: .8rem; }
 
-.recruitment-nav, .talent-nav { display: flex; gap: .35rem; overflow-x: auto; margin: -1rem 0 1.3rem; padding: .35rem; border: 1px solid var(--line); border-radius: 12px; background: #e9eeea; }
-.recruitment-nav button, .talent-nav button { flex: 0 0 auto; border: 0; border-radius: 8px; padding: .65rem .85rem; background: transparent; color: var(--muted); font-weight: 700; }
-.recruitment-nav button.active, .talent-nav button.active { background: white; color: var(--green); box-shadow: 0 3px 12px rgba(24, 57, 51, .09); }
+/* 二級分頁列。招募、人才盤點、排課、訓練追蹤共用同一套外觀，避免各組長得不一樣。 */
+.recruitment-nav, .talent-nav, .group-nav { display: flex; gap: .35rem; overflow-x: auto; margin: -1rem 0 1.3rem; padding: .35rem; border: 1px solid var(--line); border-radius: 12px; background: #e9eeea; }
+.recruitment-nav button, .talent-nav button, .group-nav button { flex: 0 0 auto; border: 0; border-radius: 8px; padding: .65rem .85rem; background: transparent; color: var(--muted); font-weight: 700; }
+.recruitment-nav button.active, .talent-nav button.active, .group-nav button.active { background: white; color: var(--green); box-shadow: 0 3px 12px rgba(24, 57, 51, .09); }
 .panel.selected { border-color: var(--green-2); box-shadow: 0 0 0 2px rgba(29,103,93,.12); }
 .funnel-grid { display: grid; grid-template-columns: repeat(7, minmax(116px, 1fr)); gap: .55rem; overflow-x: auto; padding-bottom: .3rem; }
 .funnel-card { position: relative; min-width: 116px; padding: .85rem; border: 1px solid var(--line); border-radius: 12px; background: white; }
@@ -423,7 +424,7 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
   .score-row em { grid-column: 1 / -1; }
   .reminder-card { grid-template-columns: auto 1fr; }
   .reminder-card > span { grid-column: 2; justify-self: start; }
-  .recruitment-nav, .talent-nav { margin-top: -.5rem; }
+  .recruitment-nav, .talent-nav, .group-nav { margin-top: -.5rem; }
   .nine-grid { min-width: 480px; grid-template-columns: 84px repeat(3, minmax(96px, 1fr)); }
   .nine-grid-cell { min-height: 64px; padding: .35rem; }
   .idp-item-fields, .idp-item-fields-employee { grid-template-columns: 1fr; }

@@ -24,24 +24,29 @@ import type {
   User,
 } from "../types";
 
+/**
+ * 側邊欄分組。原本 17 個項目平鋪，其中「招募」「人才盤點」「健康與證照」已用
+ * 頁內二級 tab 分組，其餘攤平——同一份側邊欄裡並存兩種層級邏輯。
+ *
+ * 此處只合併**使用情境上確實同類**的項目，不為了減少數量硬湊：
+ * - 排課＝開課到結案的同一條作業流；重要日子存在的目的就是約束排課。
+ * - 訓練追蹤＝純檢視訓練成效，不做資料登錄。
+ * 出缺勤與報表雖有資料流關係（前者是後者的資料來源）但使用情境不同，維持分開。
+ */
 type AdminTab =
   | "dashboard"
   | "employees"
-  | "calendar"
-  | "courses"
-  | "attendance"
-  | "completion"
-  | "mandatory-training"
-  | "enrollment-approval"
-  | "tests"
+  | "scheduling"
+  | "training"
   | "health"
-  | "training-matrix"
-  | "recruitment"
-  | "special-days"
   | "attendance-management"
+  | "recruitment"
   | "reports"
   | "talent"
   | "settings";
+
+type SchedulingSection = "calendar" | "courses" | "enrollment-approval" | "attendance" | "special-days";
+type TrainingSection = "completion" | "mandatory-training" | "training-matrix" | "tests";
 
 const LEVEL_LABEL = ["", "低", "中", "高"];
 const todayMonth = () => new Date().toISOString().slice(0, 7);
@@ -68,18 +73,11 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
   const tabs: Array<{ id: AdminTab; label: string }> = [
     { id: "dashboard", label: "管理儀表板" },
     { id: "employees", label: "員工管理" },
-    { id: "calendar", label: "排課月曆" },
-    { id: "courses", label: "課程管理" },
-    { id: "attendance", label: "出席登錄" },
-    { id: "completion", label: "完訓追蹤" },
-    { id: "mandatory-training", label: "必修訓練清單" },
-    { id: "enrollment-approval", label: "報名審核" },
-    { id: "tests", label: "測驗紀錄" },
+    { id: "scheduling", label: "排課" },
+    { id: "training", label: "訓練追蹤" },
     { id: "health", label: "健康與證照" },
-    { id: "training-matrix", label: "訓練矩陣" },
-    { id: "recruitment", label: "招募管理" },
-    { id: "special-days", label: "重要日子" },
     { id: "attendance-management", label: "出缺勤管理" },
+    { id: "recruitment", label: "招募管理" },
     { id: "reports", label: "報表" },
     { id: "talent", label: "人才盤點" },
     { id: "settings", label: "系統設定" },
@@ -117,23 +115,93 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
         </header>
         {tab === "dashboard" && <AdminDashboard />}
         {tab === "employees" && <EmployeeManagementPage />}
-        {tab === "calendar" && <AdminCalendar />}
-        {tab === "courses" && <CourseManagement />}
-        {tab === "attendance" && <AttendancePage />}
-        {tab === "completion" && <CompletionPage />}
-        {tab === "mandatory-training" && <MandatoryTrainingPage />}
-        {tab === "enrollment-approval" && <EnrollmentApprovalPage />}
-        {tab === "tests" && <TestsPage />}
+        {tab === "scheduling" && <SchedulingGroupPage />}
+        {tab === "training" && <TrainingGroupPage />}
         {tab === "health" && <HealthAndCertificationsPage />}
-        {tab === "training-matrix" && <TrainingMatrixPage />}
-        {tab === "recruitment" && <RecruitmentPage />}
-        {tab === "special-days" && <SpecialDaysPage />}
         {tab === "attendance-management" && <AttendanceManagementPage />}
+        {tab === "recruitment" && <RecruitmentPage />}
         {tab === "reports" && <ReportsPage />}
         {tab === "talent" && <TalentManagementPage />}
         {tab === "settings" && <SystemSettingsPage />}
       </main>
     </div>
+  );
+}
+
+/** 二級分頁列。與招募（.recruitment-nav）、人才盤點（.talent-nav）共用同一套外觀。 */
+function GroupNav<T extends string>({ sections, current, onChange, label }: {
+  sections: Array<{ id: T; label: string }>;
+  current: T;
+  onChange: (id: T) => void;
+  label: string;
+}) {
+  return (
+    <div class="group-nav" role="tablist" aria-label={label}>
+      {sections.map((item) => (
+        <button
+          class={current === item.id ? "active" : ""}
+          onClick={() => onChange(item.id)}
+          role="tab"
+          aria-selected={current === item.id}
+          key={item.id}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 排課：開課到結案的同一條作業流。重要日子（封鎖日／全員必訓日）也放這裡——
+ * 它存在的目的就是約束排課，脫離排課情境沒有意義。
+ */
+function SchedulingGroupPage() {
+  const [section, setSection] = useState<SchedulingSection>("calendar");
+  return (
+    <>
+      <GroupNav
+        label="排課分頁"
+        current={section}
+        onChange={setSection}
+        sections={[
+          { id: "calendar", label: "排課月曆" },
+          { id: "courses", label: "課程管理" },
+          { id: "enrollment-approval", label: "報名審核" },
+          { id: "attendance", label: "出席登錄" },
+          { id: "special-days", label: "重要日子" },
+        ]}
+      />
+      {section === "calendar" && <AdminCalendar />}
+      {section === "courses" && <CourseManagement />}
+      {section === "enrollment-approval" && <EnrollmentApprovalPage />}
+      {section === "attendance" && <AttendancePage />}
+      {section === "special-days" && <SpecialDaysPage />}
+    </>
+  );
+}
+
+/** 訓練追蹤：四者都是檢視訓練成效，不做資料登錄。 */
+function TrainingGroupPage() {
+  const [section, setSection] = useState<TrainingSection>("completion");
+  return (
+    <>
+      <GroupNav
+        label="訓練追蹤分頁"
+        current={section}
+        onChange={setSection}
+        sections={[
+          { id: "completion", label: "完訓追蹤" },
+          { id: "mandatory-training", label: "必修訓練清單" },
+          { id: "training-matrix", label: "訓練矩陣" },
+          { id: "tests", label: "測驗紀錄" },
+        ]}
+      />
+      {section === "completion" && <CompletionPage />}
+      {section === "mandatory-training" && <MandatoryTrainingPage />}
+      {section === "training-matrix" && <TrainingMatrixPage />}
+      {section === "tests" && <TestsPage />}
+    </>
   );
 }
 
