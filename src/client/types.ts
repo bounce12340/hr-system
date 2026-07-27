@@ -171,6 +171,37 @@ export interface JobTypeOption {
   requiredLevel: number;
 }
 
+// ---- 登入帳號生命週期管理（規格：員工管理頁內的帳號欄位與操作）----
+// 對應後端 /api/admin/users 與 /api/admin/employees/{id}/responsibilities。
+// 欄位名稱依主對話訂定的契約；細節（例如 create/reset-password 回應是否
+// 內嵌 temporaryPassword、responsibilities 回應的確切形狀）在
+// EmployeeAdminPages.tsx 內以防禦性寫法解析，待後端落地後再核對調整。
+export interface AdminUserAccount {
+  id: string;
+  email: string;
+  role: Role;
+  active: boolean;
+  mustChangePassword: boolean;
+  employeeId: string | null;
+  employeeName: string | null;
+  employeeStatus: EmployeeStatus | null;
+  auditRefCount: number;
+}
+
+export interface DeleteAccountResult {
+  mode: "deleted" | "archived";
+  auditRefCount: number;
+  message?: string;
+}
+
+export interface EmployeeResponsibility {
+  keyPositionId: string;
+  keyPositionTitle: string;
+  department: string;
+  relation: "incumbent" | "successor";
+  relationLabel?: string;
+}
+
 // ---- 系統設定／職務類型管理（規格 §七 Admin「系統設定」）----
 // 對應後端 GET/PATCH /api/admin/settings 與 /api/admin/job-types（見 src/server）。
 

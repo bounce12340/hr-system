@@ -75,6 +75,7 @@ textarea { min-height: 92px; resize: vertical; }
 .alert { padding: .85rem 1rem; border-radius: 10px; margin: 0 0 1rem; font-weight: 600; }
 .alert.error { color: #842f2f; background: #f9e6e3; border: 1px solid #efc4be; }
 .alert.success { color: #245f50; background: #dff0e8; border: 1px solid #bedfd3; }
+.alert.warning { color: #7a4413; background: #fdf1e3; border: 1px solid #f0d3ab; }
 .toolbar { display: flex; align-items: center; gap: .65rem; margin-bottom: 1rem; }
 .segmented { margin-left: auto; display: flex; padding: 3px; background: #e5eae6; border-radius: 10px; }
 .segmented button { border: 0; background: transparent; padding: .5rem .8rem; border-radius: 7px; color: var(--muted); }
@@ -205,7 +206,16 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
 .reminder-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--red); color: white; font-weight: 700; }
 
 .mandatory-table { min-width: 920px; }
-.employee-table { min-width: 980px; }
+.employee-table { min-width: 1120px; }
+.employee-table .row-actions { flex-wrap: wrap; justify-content: flex-start; max-width: 220px; }
+
+/* 登入帳號生命週期管理（員工管理頁：帳號欄位、帳號管理視窗、一次性臨時密碼） */
+.account-detail { display: grid; gap: .85rem; }
+.password-reveal { display: grid; gap: .9rem; }
+.password-reveal-box { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; padding: .9rem 1rem; background: #eef4f1; border: 2px dashed var(--green-2); border-radius: 10px; }
+.password-reveal-box code { flex: 1 1 auto; min-width: 0; font: 700 1.1rem/1.35 "Plus Jakarta Sans", monospace; letter-spacing: .03em; word-break: break-all; color: var(--green); }
+.responsibility-list { margin: .5rem 0 0; padding-left: 1.1rem; }
+.responsibility-list li { margin-bottom: .3rem; }
 .attendance-record-table { min-width: 920px; }
 .course-status-list { display: flex; flex-wrap: wrap; gap: .35rem; }
 .course-status-list span { padding: .35rem .5rem; border-radius: 7px; font-size: .72rem; font-weight: 600; }
@@ -410,4 +420,7 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
   .settings-row { flex-direction: column; align-items: stretch; }
   .settings-row input[type="number"], .settings-row input:not([type]), .settings-row input[type="text"] { width: 100%; }
   .info-grid { grid-template-columns: 1fr; }
+  .password-reveal-box { flex-direction: column; align-items: stretch; }
+  .password-reveal-box code { text-align: center; }
+  .account-detail .button-row { flex-direction: column; align-items: stretch; }
 }

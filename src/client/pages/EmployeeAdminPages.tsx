@@ -2,7 +2,14 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { api, jsonBody } from "../api";
 import { exportCsv } from "../download";
 import type { SheetRow } from "../export";
-import type { Employee, ImportSummary, JobTypeOption } from "../types";
+import type {
+  AdminUserAccount,
+  Employee,
+  EmployeeResponsibility,
+  ImportSummary,
+  JobTypeOption,
+  Role,
+} from "../types";
 
 // ---- 員工管理（規格 §七 Admin 導覽、§九 CSV 匯入）----
 // 對應後端 `/api/admin/employees`（GET/POST/PATCH）與 `/api/admin/employees/import`（見 src/server/m1.ts）。
@@ -32,6 +39,90 @@ function effectiveStatus(employee: Employee): string {
   return employee.status ?? "active";
 }
 
+// ---- 登入帳號生命週期管理 ----
+// 對應後端 GET/POST/PATCH/DELETE /api/admin/users 與
+// GET /api/admin/employees/{id}/responsibilities（由另一位 agent 同步實作
+// 後端，本檔完成時可能尚未就緒）。欄位型別、布林／數字編碼與回應信封的
+// 精確形狀，皆以下列函式做防禦性解析，避免後端實際回傳格式與猜測略有出入
+// 時整頁面直接壞掉。
+
+const ROLE_LABEL: Record<Role, string> = { admin: "管理者", employee: "一般員工" };
+
+function normalizeAccountRow(raw: unknown): AdminUserAccount {
+  const row = (raw ?? {}) as Record<string, unknown>;
+  const employeeStatus = row.employeeStatus === "active" || row.employeeStatus === "inactive" ? row.employeeStatus : null;
+  return {
+    id: String(row.id ?? ""),
+    email: String(row.email ?? ""),
+    role: row.role === "admin" ? "admin" : "employee",
+    active: Boolean(row.active),
+    mustChangePassword: Boolean(row.mustChangePassword),
+    employeeId: row.employeeId == null ? null : String(row.employeeId),
+    employeeName: row.employeeName == null ? null : String(row.employeeName),
+    employeeStatus,
+    auditRefCount: Number(row.auditRefCount ?? 0),
+  };
+}
+
+// 建立帳號／重設密碼的回應「含 temporaryPassword」，但確切是攤平在頂層還是
+// 包在 user/account 之下，規格未逐字給定，因此兩種形狀都嘗試解析。
+function extractTemporaryPassword(raw: unknown): string {
+  if (!raw || typeof raw !== "object") return "";
+  const row = raw as Record<string, unknown>;
+  if (typeof row.temporaryPassword === "string") return row.temporaryPassword;
+  for (const key of ["user", "account", "data"]) {
+    const nested = row[key];
+    if (nested && typeof nested === "object" && typeof (nested as Record<string, unknown>).temporaryPassword === "string") {
+      return (nested as Record<string, unknown>).temporaryPassword as string;
+    }
+  }
+  return "";
+}
+
+function extractDeleteResult(raw: unknown): { mode: "deleted" | "archived"; auditRefCount: number; message: string } {
+  const row = (raw ?? {}) as Record<string, unknown>;
+  return {
+    mode: row.mode === "archived" ? "archived" : "deleted",
+    auditRefCount: Number(row.auditRefCount ?? 0),
+    message: typeof row.message === "string" ? row.message : "",
+  };
+}
+
+// 職責端點回應的確切形狀未逐字給定（可能是單一陣列並標註 relation，也可能
+// 分兩個陣列各自代表現任者／繼任者），這裡盡量涵蓋常見形狀後統一成單一清單。
+function normalizeResponsibilities(raw: unknown): EmployeeResponsibility[] {
+  if (!raw || typeof raw !== "object") return [];
+  const record = raw as Record<string, unknown>;
+  const buckets: Array<{ item: unknown; forcedRelation?: "incumbent" | "successor" }> = [];
+  const direct = record.responsibilities ?? record.items;
+  if (Array.isArray(direct)) {
+    for (const item of direct) buckets.push({ item });
+  }
+  const incumbentList = record.incumbentOf ?? record.incumbentPositions;
+  if (Array.isArray(incumbentList)) {
+    for (const item of incumbentList) buckets.push({ item, forcedRelation: "incumbent" });
+  }
+  const successorList = record.successorOf ?? record.successorPositions;
+  if (Array.isArray(successorList)) {
+    for (const item of successorList) buckets.push({ item, forcedRelation: "successor" });
+  }
+  return buckets.map(({ item, forcedRelation }) => {
+    const row = (item ?? {}) as Record<string, unknown>;
+    const relationRaw = String(row.relation ?? row.role ?? row.type ?? "").toLowerCase();
+    return {
+      keyPositionId: String(row.keyPositionId ?? row.id ?? ""),
+      keyPositionTitle: String(row.keyPositionTitle ?? row.title ?? row.positionTitle ?? ""),
+      department: String(row.department ?? ""),
+      relation: forcedRelation ?? (relationRaw === "successor" ? "successor" : "incumbent"),
+      relationLabel: typeof row.relationLabel === "string" ? row.relationLabel : undefined,
+    };
+  });
+}
+
+function actionErrorMessage(caught: unknown, fallback: string): string {
+  return caught instanceof Error ? caught.message : fallback;
+}
+
 interface EmployeeForm {
   employeeNo: string;
   name: string;
@@ -51,6 +142,20 @@ function emptyForm(): EmployeeForm {
   };
 }
 
+type AccountModalView = "manage" | "reveal";
+
+interface AccountModalState {
+  employee: Employee;
+  account: AdminUserAccount | null;
+  view: AccountModalView;
+  role: Role;
+  revealPassword: string;
+  revealContext: "create" | "reset";
+  copied: boolean;
+  busy: boolean;
+  error: string;
+}
+
 export function EmployeeManagementPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [jobTypes, setJobTypes] = useState<JobTypeOption[]>([]);
@@ -67,6 +172,29 @@ export function EmployeeManagementPage() {
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState("");
 
+  // ---- 登入帳號生命週期管理 ----
+  const [accounts, setAccounts] = useState<AdminUserAccount[]>([]);
+  const [accountsError, setAccountsError] = useState("");
+  const [accountModal, setAccountModal] = useState<AccountModalState | null>(null);
+  const [responsibilities, setResponsibilities] = useState<EmployeeResponsibility[] | null>(null);
+  const [responsibilitiesLoading, setResponsibilitiesLoading] = useState(false);
+
+  const accountByEmployee = useMemo(
+    () => new Map(accounts.filter((account) => account.employeeId).map((account) => [account.employeeId as string, account])),
+    [accounts],
+  );
+
+  async function loadAccounts() {
+    try {
+      const data = await api<{ users: unknown[] }>("/api/admin/users");
+      setAccounts(data.users.map(normalizeAccountRow));
+      setAccountsError("");
+    } catch (caught) {
+      setAccounts([]);
+      setAccountsError(actionErrorMessage(caught, "登入帳號功能目前無法使用。"));
+    }
+  }
+
   async function load() {
     try {
       const [employeeData, matrixData] = await Promise.all([
@@ -78,6 +206,7 @@ export function EmployeeManagementPage() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "讀取員工資料失敗。");
     }
+    await loadAccounts();
   }
   useEffect(() => { void load(); }, []);
 
@@ -175,12 +304,16 @@ export function EmployeeManagementPage() {
     setError("");
     setMessage("");
     try {
-      await api(`/api/admin/employees/${terminating.id}`, {
+      // 後端會在標記離職時一併停用該員工的登入帳號，並回報實際停用的帳號數
+      // （見 src/server/m1.ts updateEmployee 呼叫 accounts.ts
+      // deactivateAccountsForEmployee），用這個權威數字組訊息，不用本地猜測。
+      const result = await api<{ deactivatedAccounts?: number }>(`/api/admin/employees/${terminating.id}`, {
         method: "PATCH",
         ...jsonBody({ ...employeeBasePayload(terminating), status: "inactive", terminationDate }),
       });
-      setMessage(`已將「${terminating.name}」標記為離職。`);
-      setTerminating(null);
+      const deactivatedAccounts = result.deactivatedAccounts ?? 0;
+      setMessage(`已將「${terminating.name}」標記為離職${deactivatedAccounts > 0 ? "，其登入帳號已一併停用" : ""}。`);
+      closeTerminationModal();
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "標記離職失敗。");
@@ -200,6 +333,148 @@ export function EmployeeManagementPage() {
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "更新失敗。");
+    }
+  }
+
+  // 標記離職會自動停用登入帳號；開啟確認視窗時一併查詢該員工是否持有關鍵
+  // 職位的現任者／繼任者身分，離職前提醒 HR 先行移轉（僅提醒，不阻擋操作）。
+  async function openTerminationModal(employee: Employee) {
+    setTerminating(employee);
+    setTerminationDate(todayDate());
+    setResponsibilities(null);
+    setResponsibilitiesLoading(true);
+    try {
+      const data = await api<unknown>(`/api/admin/employees/${employee.id}/responsibilities`);
+      setResponsibilities(normalizeResponsibilities(data));
+    } catch {
+      // 讀取職責清單失敗不應阻擋標記離職，僅是少了提醒；保守顯示為「無資料」。
+      setResponsibilities([]);
+    } finally {
+      setResponsibilitiesLoading(false);
+    }
+  }
+
+  function closeTerminationModal() {
+    setTerminating(null);
+    setResponsibilities(null);
+    setResponsibilitiesLoading(false);
+  }
+
+  // ---- 登入帳號生命週期管理 ----
+
+  function openAccountModal(employee: Employee) {
+    const account = accountByEmployee.get(employee.id) ?? null;
+    setAccountModal({
+      employee,
+      account,
+      view: "manage",
+      role: account?.role ?? "employee",
+      revealPassword: "",
+      revealContext: "create",
+      copied: false,
+      busy: false,
+      error: "",
+    });
+  }
+
+  // 一次性密碼只存在這個 state 裡；關閉視窗即整份丟棄，不做任何持久化或
+  // 二次讀取途徑，符合「關閉後不可再從任何地方取得」的要求。
+  function closeAccountModal() {
+    setAccountModal(null);
+  }
+
+  async function createAccountForModal() {
+    if (!accountModal || accountModal.account) return;
+    const { employee, role } = accountModal;
+    setAccountModal((current) => (current ? { ...current, busy: true, error: "" } : current));
+    try {
+      const data = await api<unknown>("/api/admin/users", {
+        method: "POST",
+        ...jsonBody({ employeeId: employee.id, role }),
+      });
+      const password = extractTemporaryPassword(data);
+      await loadAccounts();
+      setAccountModal((current) => (current ? { ...current, busy: false, view: "reveal", revealContext: "create", revealPassword: password, copied: false } : current));
+    } catch (caught) {
+      setAccountModal((current) => (current ? { ...current, busy: false, error: actionErrorMessage(caught, "建立帳號失敗。") } : current));
+    }
+  }
+
+  async function toggleAccountActive() {
+    if (!accountModal?.account) return;
+    const account = accountModal.account;
+    const next = !account.active;
+    if (!next && !confirm(`確定停用「${accountModal.employee.name}」的登入帳號？停用後將立即無法登入。`)) return;
+    setAccountModal((current) => (current ? { ...current, busy: true, error: "" } : current));
+    try {
+      await api(`/api/admin/users/${account.id}`, { method: "PATCH", ...jsonBody({ active: next }) });
+      await loadAccounts();
+      setAccountModal((current) => (current && current.account ? { ...current, busy: false, account: { ...current.account, active: next } } : current));
+    } catch (caught) {
+      setAccountModal((current) => (current ? { ...current, busy: false, error: actionErrorMessage(caught, "更新帳號狀態失敗。") } : current));
+    }
+  }
+
+  async function changeAccountRole(role: Role) {
+    if (!accountModal?.account) return;
+    const accountId = accountModal.account.id;
+    setAccountModal((current) => (current ? { ...current, busy: true, error: "", role } : current));
+    try {
+      await api(`/api/admin/users/${accountId}`, { method: "PATCH", ...jsonBody({ role }) });
+      await loadAccounts();
+      setAccountModal((current) => (current && current.account ? { ...current, busy: false, account: { ...current.account, role } } : current));
+    } catch (caught) {
+      setAccountModal((current) => (current ? { ...current, busy: false, error: actionErrorMessage(caught, "變更角色失敗。") } : current));
+    }
+  }
+
+  async function resetAccountPassword() {
+    if (!accountModal?.account) return;
+    if (!confirm(`確定要重設「${accountModal.employee.name}」的密碼？原密碼將立即失效。`)) return;
+    const accountId = accountModal.account.id;
+    setAccountModal((current) => (current ? { ...current, busy: true, error: "" } : current));
+    try {
+      const data = await api<unknown>(`/api/admin/users/${accountId}/reset-password`, {
+        method: "POST",
+        ...jsonBody({}),
+      });
+      const password = extractTemporaryPassword(data);
+      await loadAccounts();
+      setAccountModal((current) => (current ? { ...current, busy: false, view: "reveal", revealContext: "reset", revealPassword: password, copied: false } : current));
+    } catch (caught) {
+      setAccountModal((current) => (current ? { ...current, busy: false, error: actionErrorMessage(caught, "重設密碼失敗。") } : current));
+    }
+  }
+
+  async function deleteAccountFromModal() {
+    if (!accountModal?.account) return;
+    const account = accountModal.account;
+    const confirmMessage = account.auditRefCount > 0
+      ? `此帳號有 ${account.auditRefCount} 筆操作紀錄，刪除後將改為封存而非真正刪除，是否繼續？`
+      : `確定刪除「${accountModal.employee.name}」的登入帳號？此操作無法復原。`;
+    if (!confirm(confirmMessage)) return;
+    setAccountModal((current) => (current ? { ...current, busy: true, error: "" } : current));
+    try {
+      const data = await api<unknown>(`/api/admin/users/${account.id}`, { method: "DELETE" });
+      const result = extractDeleteResult(data);
+      await loadAccounts();
+      setMessage(result.message || (result.mode === "archived"
+        ? `帳號因有 ${result.auditRefCount} 筆操作紀錄，已改為封存而非刪除。`
+        : "帳號已刪除。"));
+      setError("");
+      closeAccountModal();
+    } catch (caught) {
+      setAccountModal((current) => (current ? { ...current, busy: false, error: actionErrorMessage(caught, "刪除帳號失敗。") } : current));
+    }
+  }
+
+  async function copyRevealedPassword() {
+    if (!accountModal?.revealPassword) return;
+    try {
+      await navigator.clipboard.writeText(accountModal.revealPassword);
+      setAccountModal((current) => (current ? { ...current, copied: true } : current));
+    } catch {
+      setAccountModal((current) => (current ? { ...current, error: "自動複製失敗，請手動選取密碼文字複製。" } : current));
     }
   }
 
@@ -307,10 +582,12 @@ export function EmployeeManagementPage() {
           </div>
           <table class="employee-table">
             <thead>
-              <tr><th>員工編號</th><th>姓名</th><th>部門／職等</th><th>職稱</th><th>職務類型</th><th>到職日</th><th>狀態</th><th>薪資</th><th /></tr>
+              <tr><th>員工編號</th><th>姓名</th><th>部門／職等</th><th>職稱</th><th>職務類型</th><th>到職日</th><th>狀態</th><th>薪資</th><th>登入帳號</th><th /></tr>
             </thead>
             <tbody>
-              {filteredEmployees.map((employee) => (
+              {filteredEmployees.map((employee) => {
+                const account = accountByEmployee.get(employee.id) ?? null;
+                return (
                 <tr key={employee.id}>
                   <td>{employee.employeeNo}</td>
                   <td>
@@ -327,17 +604,29 @@ export function EmployeeManagementPage() {
                   <td><span class={`status ${effectiveStatus(employee) === "active" ? "ok" : "danger"}`}>{STATUS_LABEL[effectiveStatus(employee)] ?? effectiveStatus(employee)}</span></td>
                   <td>{formatSalary(employee.salary, salaryVisible)}</td>
                   <td>
+                    {accountsError
+                      ? <small>帳號功能暫不可用</small>
+                      : account
+                        ? <>
+                            <span class={`status ${account.active ? "ok" : "danger"}`}>{account.active ? "啟用" : "停用"}</span>
+                            <small>{account.email}</small>
+                          </>
+                        : <span class="status">尚無帳號</span>}
+                  </td>
+                  <td>
                     <div class="row-actions">
                       <button onClick={() => edit(employee)}>編輯</button>
                       {effectiveStatus(employee) === "active"
-                        ? <button class="danger-action" onClick={() => { setTerminating(employee); setTerminationDate(todayDate()); }}>標記離職</button>
+                        ? <button class="danger-action" onClick={() => void openTerminationModal(employee)}>標記離職</button>
                         : <button onClick={() => void reactivate(employee)}>恢復在職</button>}
+                      <button disabled={!!accountsError} onClick={() => openAccountModal(employee)}>帳號管理</button>
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {filteredEmployees.length === 0 && (
-                <tr><td colSpan={9}><div class="empty-state">目前沒有符合篩選條件的員工。</div></td></tr>
+                <tr><td colSpan={10}><div class="empty-state">目前沒有符合篩選條件的員工。</div></td></tr>
               )}
             </tbody>
           </table>
@@ -389,15 +678,107 @@ export function EmployeeManagementPage() {
           <div class="modal" role="dialog" aria-modal="true" aria-label="標記離職">
             <div class="modal-title">
               <div><p class="eyebrow">OFFBOARDING</p><h2>標記「{terminating.name}」離職</h2></div>
-              <button class="icon-button" onClick={() => setTerminating(null)}>×</button>
+              <button class="icon-button" onClick={closeTerminationModal}>×</button>
             </div>
             <form onSubmit={confirmTermination}>
               <label>離職日<input type="date" value={terminationDate} onInput={(event) => setTerminationDate(event.currentTarget.value)} required /></label>
+              {accountByEmployee.has(terminating.id) && (
+                <div class="alert warning">標記離職將自動停用此員工的登入帳號，其將立即無法再登入系統。</div>
+              )}
+              {responsibilitiesLoading && <small>檢查關鍵職位歸屬中…</small>}
+              {responsibilities && responsibilities.length > 0 && (
+                <div class="conflict-box">
+                  <strong>此員工目前持有 {responsibilities.length} 項關鍵職位身分，建議離職前先完成移轉（僅提醒，不會阻擋離職）：</strong>
+                  <ul class="responsibility-list">
+                    {responsibilities.map((item) => (
+                      <li key={`${item.keyPositionId}-${item.relation}`}>
+                        {item.keyPositionTitle}{item.department ? `（${item.department}）` : ""}－{item.relationLabel || (item.relation === "successor" ? "繼任者" : "現任者")}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div class="modal-actions">
-                <button type="button" class="secondary" onClick={() => setTerminating(null)}>取消</button>
+                <button type="button" class="secondary" onClick={closeTerminationModal}>取消</button>
                 <button class="primary">確認離職</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {accountModal && (
+        <div class="modal-backdrop" role="presentation">
+          <div class="modal" role="dialog" aria-modal="true" aria-label="帳號管理">
+            <div class="modal-title">
+              <div><p class="eyebrow">ACCOUNT ACCESS</p><h2>{accountModal.employee.name} 的登入帳號</h2></div>
+              {accountModal.view === "manage" && <button class="icon-button" onClick={closeAccountModal}>×</button>}
+            </div>
+            <Message text={accountModal.error} error />
+            {accountModal.view === "reveal" ? (
+              <div class="password-reveal">
+                <p>{accountModal.revealContext === "create" ? "帳號已建立，這是系統產生的臨時密碼：" : "密碼已重設，這是新的臨時密碼："}</p>
+                <div class="password-reveal-box">
+                  <code>{accountModal.revealPassword || "（未取得密碼，請改用「重設密碼」重新產生）"}</code>
+                  <button type="button" class="secondary" disabled={!accountModal.revealPassword} onClick={() => void copyRevealedPassword()}>
+                    {accountModal.copied ? "已複製" : "複製"}
+                  </button>
+                </div>
+                <div class="alert warning">
+                  此密碼只會顯示這一次，請立即複製並轉交給「{accountModal.employee.name}」。視窗關閉後將無法再從任何地方取得，若日後遺失請使用「重設密碼」重新產生。
+                </div>
+                <div class="modal-actions">
+                  <button class="primary" onClick={closeAccountModal}>我已複製，關閉視窗</button>
+                </div>
+              </div>
+            ) : accountModal.account ? (
+              <div class="account-detail">
+                <div class="info-grid">
+                  <div class="info-field"><dt>Email</dt><dd>{accountModal.account.email}</dd></div>
+                  <div class="info-field"><dt>帳號狀態</dt><dd><span class={`status ${accountModal.account.active ? "ok" : "danger"}`}>{accountModal.account.active ? "啟用" : "停用"}</span></dd></div>
+                </div>
+                <label>
+                  角色
+                  <select
+                    value={accountModal.role}
+                    disabled={accountModal.busy}
+                    onChange={(event) => void changeAccountRole(event.currentTarget.value as Role)}
+                  >
+                    <option value="employee">{ROLE_LABEL.employee}</option>
+                    <option value="admin">{ROLE_LABEL.admin}</option>
+                  </select>
+                </label>
+                {accountModal.account.mustChangePassword && <small>此帳號尚未完成首次登入的密碼變更。</small>}
+                {accountModal.account.auditRefCount > 0 && <small>此帳號有 {accountModal.account.auditRefCount} 筆操作紀錄，刪除時將改為封存。</small>}
+                <div class="button-row">
+                  <button type="button" class="secondary" disabled={accountModal.busy} onClick={() => void toggleAccountActive()}>
+                    {accountModal.account.active ? "停用帳號" : "啟用帳號"}
+                  </button>
+                  <button type="button" class="secondary" disabled={accountModal.busy} onClick={() => void resetAccountPassword()}>重設密碼</button>
+                  <button type="button" class="secondary danger-action" disabled={accountModal.busy} onClick={() => void deleteAccountFromModal()}>刪除帳號</button>
+                </div>
+              </div>
+            ) : (
+              <div class="account-detail">
+                <p class="muted-copy">此員工尚未建立登入帳號。</p>
+                <label>
+                  角色
+                  <select
+                    value={accountModal.role}
+                    onChange={(event) => setAccountModal((current) => (current ? { ...current, role: event.currentTarget.value as Role } : current))}
+                  >
+                    <option value="employee">{ROLE_LABEL.employee}</option>
+                    <option value="admin">{ROLE_LABEL.admin}</option>
+                  </select>
+                </label>
+                <div class="modal-actions">
+                  <button type="button" class="secondary" onClick={closeAccountModal}>取消</button>
+                  <button type="button" class="primary" disabled={accountModal.busy} onClick={() => void createAccountForModal()}>
+                    {accountModal.busy ? "建立中…" : "建立帳號"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

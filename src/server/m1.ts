@@ -1,3 +1,4 @@
+import { deactivateAccountsForEmployee } from "./accounts";
 import { isValidIsoDate, parseCsvTable, parseNonNegativeInteger } from "./csv";
 import {
   ApiError,
@@ -1064,12 +1065,21 @@ async function createEmployee(context: ApiContext): Promise<Response> {
 /**
  * 更新員工主檔。離職透過此端點設定 status='inactive' + terminationDate 完成，
  * 不提供實體刪除（規格與人資領域慣例：保留歷史關聯，見 enrollments／training_records）。
+ *
+ * 存取控制連動（重要）：標記離職時一併停用其登入帳號並刪除既有 sessions
+ * （見 accounts.ts deactivateAccountsForEmployee）。在此之前離職者仍可登入查看
+ * 自己的訓練紀錄與 IDP、報名課程，是實質的存取控制缺陷。
+ * 反向（復職）刻意不自動啟用帳號，須由 admin 明確操作。
  */
 async function updateEmployee(context: ApiContext, id: string): Promise<Response> {
   const fields = parseEmployee(await parseJson<EmployeeInput>(context.request));
   await ensureJobType(context.env.DB, fields.jobTypeId);
   await assertEmployeeNoAvailable(context.env.DB, fields.employeeNo, id);
   await assertEmailAvailable(context.env.DB, fields.email, id);
+  // 與 accounts.ts「不可自我停權」同一條規則：標記自己離職會連帶停用自己正在用的帳號。
+  if (fields.status === "inactive" && context.user?.employeeId === id) {
+    throw new ApiError(422, "不可將自己標記為離職，這會停用您正在使用的登入帳號。請由另一位管理員操作。");
+  }
   const result = await context.env.DB.prepare(`
     UPDATE employees SET employee_no = ?, name = ?, email = ?, department = ?, grade = ?, title = ?,
       job_type_id = ?, hire_date = ?, termination_date = ?, status = ?, salary = ?,
@@ -1080,7 +1090,13 @@ async function updateEmployee(context: ApiContext, id: string): Promise<Response
     fields.jobTypeId, fields.hireDate, fields.terminationDate, fields.status, fields.salary, id,
   ).run();
   if (result.meta.changes === 0) throw new ApiError(404, "找不到指定員工。");
-  return json({ employee: await getEmployeeRecord(context.env.DB, id) });
+  const deactivatedAccounts = fields.status === "inactive"
+    ? await deactivateAccountsForEmployee(context.env.DB, id)
+    : 0;
+  return json({
+    employee: await getEmployeeRecord(context.env.DB, id),
+    deactivatedAccounts,
+  });
 }
 
 // ---------------------------------------------------------------------------

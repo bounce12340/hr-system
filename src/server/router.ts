@@ -1,4 +1,5 @@
-import { authenticate, changePassword, createUser, login, logout } from "./auth";
+import { handleAdminAccounts } from "./accounts";
+import { authenticate, changePassword, login, logout } from "./auth";
 import {
   ApiError,
   assertTrustedMutation,
@@ -57,13 +58,12 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (path === "/api/auth/logout" && request.method === "POST") {
       return json({}, 200, { "Set-Cookie": await logout(request, env.DB) });
     }
-    if (path === "/api/admin/users" && request.method === "POST") {
-      requireAdmin(user);
-      return json(await createUser(request, env.DB), 201);
-    }
-
     if (path.startsWith("/api/admin/")) {
       requireAdmin(user);
+      // 帳號管理放最前面：/api/admin/users 與 /api/admin/employees/{id}/responsibilities
+      // 都不與其他模組的路徑重疊，先比對可省掉後面五個模組的 match。
+      const accountsResponse = await handleAdminAccounts(context, path);
+      if (accountsResponse) return accountsResponse;
       const response = await handleAdminM1(context, path);
       if (response) return response;
       const m2Response = await handleAdminM2(context, path);

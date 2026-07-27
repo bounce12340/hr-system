@@ -168,7 +168,7 @@ export async function logout(request: Request, db: D1Database): Promise<string> 
   return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`;
 }
 
-function assertPasswordStrength(password: string): void {
+export function assertPasswordStrength(password: string): void {
   if (
     password.length < 10 ||
     !/[a-z]/.test(password) ||
@@ -178,6 +178,90 @@ function assertPasswordStrength(password: string): void {
   ) {
     throw new ApiError(422, "新密碼至少 10 碼，且須包含大小寫英文字母、數字與符號。");
   }
+}
+
+// ---------------------------------------------------------------------------
+// 系統產生的臨時密碼（登入帳號生命週期管理：建立帳號／重設密碼）
+// ---------------------------------------------------------------------------
+
+/** 去掉 l／I／O／0／1 等易混淆字元，臨時密碼需要人工轉達一次。 */
+const TEMP_LOWER = "abcdefghijkmnopqrstuvwxyz";
+const TEMP_UPPER = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+const TEMP_DIGIT = "23456789";
+const TEMP_SYMBOL = "!@#$%^&*?-_=+";
+const TEMP_ALPHABET = TEMP_LOWER + TEMP_UPPER + TEMP_DIGIT + TEMP_SYMBOL;
+const TEMP_PASSWORD_LENGTH = 16;
+
+/**
+ * 以 crypto.getRandomValues 取 [0, maxExclusive) 的均勻整數。
+ * 用拒絕取樣（丟掉尾端不完整區間）而非直接取模，避免模偏差讓前幾個字元機率偏高。
+ * 一律不使用 Math.random：它非密碼學安全，且在同一 isolate 內可被觀察後預測。
+ */
+function randomIndex(maxExclusive: number): number {
+  const limit = Math.floor(0x1_0000_0000 / maxExclusive) * maxExclusive;
+  const buffer = new Uint32Array(1);
+  for (;;) {
+    crypto.getRandomValues(buffer);
+    const value = buffer[0] ?? 0;
+    if (value < limit) return value % maxExclusive;
+  }
+}
+
+function randomChar(alphabet: string): string {
+  return alphabet.charAt(randomIndex(alphabet.length));
+}
+
+/**
+ * 產生 16 碼臨時密碼。先各取一個小寫／大寫／數字／符號保證必定通過
+ * assertPasswordStrength，其餘由完整字集補滿後整體洗牌，避免固定樣式
+ * （例如「前四碼一定是小寫大寫數字符號」）洩漏結構。
+ *
+ * 呼叫端必須把回傳值只放進「當次 HTTP 回應」，不得寫入資料庫或日誌。
+ */
+export function generateTemporaryPassword(): string {
+  const characters = [
+    randomChar(TEMP_LOWER),
+    randomChar(TEMP_UPPER),
+    randomChar(TEMP_DIGIT),
+    randomChar(TEMP_SYMBOL),
+  ];
+  while (characters.length < TEMP_PASSWORD_LENGTH) characters.push(randomChar(TEMP_ALPHABET));
+  for (let index = characters.length - 1; index > 0; index -= 1) {
+    const target = randomIndex(index + 1);
+    const current = characters[index] ?? "";
+    characters[index] = characters[target] ?? "";
+    characters[target] = current;
+  }
+  const password = characters.join("");
+  // 防禦性：字集或長度日後被改動而不再滿足強度規則時，在此就炸掉而不是產生弱密碼。
+  assertPasswordStrength(password);
+  return password;
+}
+
+export interface PasswordCredentials {
+  hash: string;
+  salt: string;
+  iterations: number;
+}
+
+/** 以新的隨機 salt 產生 PBKDF2 雜湊，與 changePassword（見 :203）同一組參數。 */
+export async function hashPassword(password: string): Promise<PasswordCredentials> {
+  const salt = new Uint8Array(16);
+  crypto.getRandomValues(salt);
+  const hash = await derivePassword(password, salt, PASSWORD_ITERATIONS);
+  return { hash: toBase64(hash), salt: toBase64(salt), iterations: PASSWORD_ITERATIONS };
+}
+
+/**
+ * 封存帳號用的憑證：格式仍是合法 base64（避免 login 解碼時炸成 500），
+ * 但內容是純隨機位元組、不對應任何密碼，因此不可能有輸入能通過驗證。
+ */
+export function unusableCredentials(): PasswordCredentials {
+  const hash = new Uint8Array(32);
+  const salt = new Uint8Array(16);
+  crypto.getRandomValues(hash);
+  crypto.getRandomValues(salt);
+  return { hash: toBase64(hash), salt: toBase64(salt), iterations: PASSWORD_ITERATIONS };
 }
 
 export async function changePassword(
@@ -218,35 +302,6 @@ export async function changePassword(
   return { ...user, mustChangePassword: false };
 }
 
-interface CreateUserBody {
-  employeeId?: unknown;
-  email?: unknown;
-  temporaryPassword?: unknown;
-  role?: unknown;
-}
-
-export async function createUser(request: Request, db: D1Database): Promise<{ id: string; email: string }> {
-  const body = await parseJson<CreateUserBody>(request);
-  const employeeId = requiredString(body.employeeId, "員工", 100);
-  const email = requiredString(body.email, "電子郵件", 200).toLowerCase();
-  const temporaryPassword = requiredString(body.temporaryPassword, "暫時密碼", 200);
-  const role = body.role === "admin" ? "admin" : body.role === "employee" ? "employee" : null;
-  if (!role) throw new ApiError(422, "角色必須是 admin 或 employee。");
-  assertPasswordStrength(temporaryPassword);
-
-  const employee = await db.prepare("SELECT id FROM employees WHERE id = ?").bind(employeeId).first();
-  if (!employee) throw new ApiError(404, "找不到指定員工。");
-  const salt = new Uint8Array(16);
-  crypto.getRandomValues(salt);
-  const hash = await derivePassword(temporaryPassword, salt, PASSWORD_ITERATIONS);
-  const id = uuid();
-  try {
-    await db.prepare(`
-      INSERT INTO users (id, employee_id, email, password_hash, password_salt, password_iterations, role, must_change_password)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-    `).bind(id, employeeId, email, toBase64(hash), toBase64(salt), PASSWORD_ITERATIONS, role).run();
-  } catch {
-    throw new ApiError(409, "此員工或電子郵件已有帳號。");
-  }
-  return { id, email };
-}
+// 帳號的建立／停用／重設密碼／刪除都移到 src/server/accounts.ts，
+// 本檔只保留登入、session 與密碼原語（derivePassword／hashPassword／
+// generateTemporaryPassword／unusableCredentials）。
