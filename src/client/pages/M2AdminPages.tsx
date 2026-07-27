@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { api, jsonBody } from "../api";
 import { CertificationReminderList, expiryText } from "../components/CertificationReminderList";
+import { monthsUntilDueText } from "../components/HealthCheckHelpers";
 import type {
   CertificationReminder,
   CertificationType,
   CourseSession,
   EmployeeCertification,
+  HealthCheckDueEntry,
   MandatoryTrainingEmployee,
   TrainingSettings,
 } from "../types";
@@ -33,6 +35,9 @@ export function AdminDashboard() {
     pendingEnrollmentCount: number;
     retrainingRequiredCount: number;
     missingMandatoryCount: number;
+    // 健檢到期提醒：規格要求併入既有提醒中心，由後端在 /api/admin/dashboard
+    // 回應中附加。欄位為選填——後端尚未加上前，畫面單純不顯示這個區塊。
+    healthCheckReminders?: HealthCheckDueEntry[];
   } | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -45,6 +50,7 @@ export function AdminDashboard() {
     <Message text={error} error />
     <div class="metric-row">
       <div class="metric accent"><span>證照到期提醒</span><strong>{data?.certificationReminders.length ?? 0}</strong></div>
+      {data?.healthCheckReminders && <div class="metric"><span>健檢到期提醒</span><strong>{data.healthCheckReminders.length}</strong></div>}
       <div class="metric"><span>試用期到期提醒</span><strong>{data?.probationReminders.length ?? 0}</strong></div>
       <div class="metric"><span>待審報名</span><strong>{data?.pendingEnrollmentCount ?? 0}</strong></div>
       <div class="metric"><span>測驗需補訓</span><strong>{data?.retrainingRequiredCount ?? 0}</strong></div>
@@ -58,6 +64,20 @@ export function AdminDashboard() {
         emptyText="目前沒有到期提醒。"
       />
     </div>
+    {data?.healthCheckReminders && data.healthCheckReminders.length > 0 && (
+      <div class="panel section-title">
+        <div class="panel-heading"><div><h2>健檢到期提醒</h2><small>詳細名單請至「健康與證照 → 待健檢名單」</small></div></div>
+        <div class="reminder-list">
+          {data.healthCheckReminders.map((entry) => (
+            <article class="reminder-card" key={entry.employeeId}>
+              <div class="reminder-icon">健</div>
+              <div><strong>{entry.name}</strong><p>{entry.employeeNo}・{entry.department}・下次應檢日 {entry.nextDueDate ?? "—"}</p></div>
+              <span class={entry.status === "overdue" ? "urgent" : ""}>{monthsUntilDueText(entry.monthsUntilDue)}</span>
+            </article>
+          ))}
+        </div>
+      </div>
+    )}
     <div class="panel section-title">
       <div class="panel-heading"><div><h2>試用期到期提醒</h2><small>提醒天數可在「招募管理 → 試用期」設定</small></div></div>
       <div class="reminder-list">

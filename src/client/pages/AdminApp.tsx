@@ -3,7 +3,6 @@ import { api, ApiClientError, jsonBody } from "../api";
 import { MonthCalendar } from "../components/Calendar";
 import {
   AdminDashboard,
-  CertificationsPage,
   EnrollmentApprovalPage,
   MandatoryTrainingPage,
   TestsPage,
@@ -12,6 +11,7 @@ import {
 import { RecruitmentPage } from "./M3AdminPages";
 import { ReportsPage } from "./M4AdminPages";
 import { TalentManagementPage } from "./M5AdminPages";
+import { HealthAndCertificationsPage } from "./M6AdminPages";
 import { EmployeeManagementPage } from "./EmployeeAdminPages";
 import { AttendanceManagementPage } from "./AttendanceAdminPages";
 import { SystemSettingsPage } from "./SettingsAdminPages";
@@ -34,7 +34,7 @@ type AdminTab =
   | "mandatory-training"
   | "enrollment-approval"
   | "tests"
-  | "certifications"
+  | "health"
   | "training-matrix"
   | "recruitment"
   | "special-days"
@@ -75,7 +75,7 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
     { id: "mandatory-training", label: "必修訓練清單" },
     { id: "enrollment-approval", label: "報名審核" },
     { id: "tests", label: "測驗紀錄" },
-    { id: "certifications", label: "證照管理" },
+    { id: "health", label: "健康與證照" },
     { id: "training-matrix", label: "訓練矩陣" },
     { id: "recruitment", label: "招募管理" },
     { id: "special-days", label: "重要日子" },
@@ -124,7 +124,7 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
         {tab === "mandatory-training" && <MandatoryTrainingPage />}
         {tab === "enrollment-approval" && <EnrollmentApprovalPage />}
         {tab === "tests" && <TestsPage />}
-        {tab === "certifications" && <CertificationsPage />}
+        {tab === "health" && <HealthAndCertificationsPage />}
         {tab === "training-matrix" && <TrainingMatrixPage />}
         {tab === "recruitment" && <RecruitmentPage />}
         {tab === "special-days" && <SpecialDaysPage />}

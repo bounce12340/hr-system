@@ -7,6 +7,7 @@ import {
   requireEmployeeIdentity,
   uuid,
 } from "./http";
+import { healthCheckReminders } from "./health";
 import type { ApiContext, AuthUser } from "./types";
 import { probationReminders } from "./m3";
 
@@ -219,11 +220,24 @@ async function expiryReminders(db: D1Database, employeeId?: string): Promise<Exp
   return result.results;
 }
 
+/**
+ * admin 提醒中心。healthCheckReminders 屬個資法第 6 條特種個資，只掛在這支 admin
+ * 端點（router.ts:62 已 requireAdmin），刻意**不**加進 employeeHome。
+ */
 async function dashboard(context: ApiContext): Promise<Response> {
-  const [settings, reminders, probationReminderRows, pending, retraining, mandatory] = await Promise.all([
+  const [
+    settings,
+    reminders,
+    probationReminderRows,
+    healthCheckReminderRows,
+    pending,
+    retraining,
+    mandatory,
+  ] = await Promise.all([
     getTrainingSettings(context.env.DB),
     expiryReminders(context.env.DB),
     probationReminders(context.env.DB),
+    healthCheckReminders(context.env.DB),
     context.env.DB.prepare(`
       SELECT COUNT(*) AS count FROM enrollments
       WHERE source = 'self' AND enrollment_status = 'waitlisted'
@@ -241,6 +255,7 @@ async function dashboard(context: ApiContext): Promise<Response> {
     settings,
     certificationReminders: reminders,
     probationReminders: probationReminderRows,
+    healthCheckReminders: healthCheckReminderRows,
     pendingEnrollmentCount: pending?.count ?? 0,
     retrainingRequiredCount: retraining?.count ?? 0,
     missingMandatoryCount,

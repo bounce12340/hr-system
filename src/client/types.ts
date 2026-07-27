@@ -267,3 +267,76 @@ export interface ImportSummary {
   skipped: number;
   errors: ImportRowError[];
 }
+
+// ---- M6：員工健康檢查追蹤（對應 src/server/health.ts＋router.ts）----
+// 後端與本檔為平行開發；此處欄位已對照 src/server/health.ts 的實際回傳鍵名
+// 核對過（非猜測）。健檢頻率依《勞工健康保護規則》年齡分級 on-read 計算：
+// 未滿 40 歲每 5 年、40–65 歲每 3 年、65 歲以上每年；沒有生日則無法分級，
+// 歸類為 missing_birth_date（第五種狀態，需請 HR 補登生日）。
+export type HealthCheckStatus = "overdue" | "due_soon" | "ok" | "never" | "missing_birth_date";
+
+export interface HealthCheckDueEntry {
+  employeeId: string;
+  employeeNo: string;
+  name: string;
+  department: string;
+  birthDate: string | null;
+  hireDate: string;
+  lastCheckDate: string | null;
+  age: number | null;
+  intervalMonths: number | null;
+  nextDueDate: string | null;
+  monthsUntilDue: number | null;
+  status: HealthCheckStatus;
+  statusLabel: string;
+  /** 從未健檢者的應檢日以到職日為基準推算。 */
+  dueBasis: "last_check" | "hire_date" | "unknown";
+}
+
+export interface HealthCheckDueListPayload {
+  reminderMonths: number;
+  windowMonths: number;
+  employees: HealthCheckDueEntry[];
+}
+
+export interface HealthCheckItem {
+  id: string;
+  name: string;
+  category: string;
+  required: number;
+  active: number;
+  sortOrder: number;
+}
+
+export type HealthCheckResultValue = "normal" | "abnormal" | "follow_up" | "pending";
+
+export interface HealthCheckResultItem {
+  id: string;
+  itemId: string;
+  itemName: string;
+  category: string;
+  itemActive: number;
+  result: HealthCheckResultValue;
+  resultLabel: string;
+  notes: string;
+}
+
+export interface HealthCheckRecord {
+  id: string;
+  employeeId: string;
+  employeeNo: string;
+  employeeName: string;
+  department: string;
+  checkDate: string;
+  institution: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+  items: HealthCheckResultItem[];
+}
+
+export interface EmployeeHealthChecksPayload {
+  reminderMonths: number;
+  summary: HealthCheckDueEntry | null;
+  healthChecks: HealthCheckRecord[];
+}

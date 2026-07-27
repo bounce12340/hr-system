@@ -50,11 +50,25 @@ async function listSettings(db: D1Database): Promise<PublicSetting[]> {
   return result.results;
 }
 
+/**
+ * 少數設定有業務上的硬性範圍，必須在這支「什麼 key 都能寫」的統一入口一併把關，
+ * 否則使用者可從這裡繞過各模組專屬端點的驗證（例如 m3 的 probation-settings）。
+ * 只列真正有範圍限制的 key；未列出者維持原本只驗型別的行為。
+ */
+const NUMBER_RANGES: Record<string, { min: number; max: number }> = {
+  // 健檢提前提醒月數，需求明訂限制 1～3（migrations/0011_health_check.sql）。
+  health_check_reminder_months: { min: 1, max: 3 },
+};
+
 function coerceIn(value: unknown, valueType: ValueType, key: string): string {
   switch (valueType) {
     case "number": {
       if (typeof value !== "number" || !Number.isFinite(value)) {
         throw new ApiError(422, `設定「${key}」須為數字。`);
+      }
+      const range = NUMBER_RANGES[key];
+      if (range && (!Number.isInteger(value) || value < range.min || value > range.max)) {
+        throw new ApiError(422, `設定「${key}」須為 ${range.min}～${range.max} 的整數。`);
       }
       return String(value);
     }

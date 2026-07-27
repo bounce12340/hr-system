@@ -1,5 +1,6 @@
 import { handleAdminAccounts } from "./accounts";
 import { authenticate, changePassword, login, logout } from "./auth";
+import { handleAdminHealthCheck, handleEmployeeHealthCheck } from "./health";
 import {
   ApiError,
   assertTrustedMutation,
@@ -74,6 +75,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       if (m4Response) return m4Response;
       const m5Response = await handleAdminM5(context, path);
       if (m5Response) return m5Response;
+      const healthResponse = await handleAdminHealthCheck(context, path);
+      if (healthResponse) return healthResponse;
       const settingsResponse = await handleAdminSettings(context, path);
       if (settingsResponse) return settingsResponse;
     }
@@ -84,6 +87,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       if (m2Response) return m2Response;
       const m5Response = await handleEmployeeM5(context, path);
       if (m5Response) return m5Response;
+      const healthResponse = await handleEmployeeHealthCheck(context, path);
+      if (healthResponse) return healthResponse;
     }
 
     throw new ApiError(404, "找不到此 API。");

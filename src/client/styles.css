@@ -110,6 +110,8 @@ textarea { min-height: 92px; resize: vertical; }
 .status.ok { background: #dcefe8; color: #226653; }
 .status.warning { background: #fff0d6; color: #8b5b12; }
 .status.danger { background: #f8dfdc; color: #9a3636; }
+.status.never { background: #e8dff3; color: #674d83; }
+.status.missing { background: #eef0f0; color: #5a6663; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 20; padding: 1rem; display: grid; place-items: center; background: rgba(12, 31, 28, .58); backdrop-filter: blur(4px); }
 .modal { width: min(560px, 100%); max-height: 92vh; overflow-y: auto; background: white; border-radius: 16px; box-shadow: 0 30px 80px rgba(7,29,25,.3); padding: 1.35rem; }
@@ -206,6 +208,22 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
 .reminder-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--red); color: white; font-weight: 700; }
 
 .mandatory-table { min-width: 920px; }
+/* 健檢待辦名單：逾期最醒目，其次是從未健檢／缺生日資料，再來是即將到期。 */
+.due-row-overdue { background: #fdf1ef; box-shadow: inset 3px 0 0 var(--red); }
+.due-row-overdue td { font-weight: 600; }
+.due-row-never { background: #f8f5fb; box-shadow: inset 3px 0 0 #8061a1; }
+.due-row-soon { background: #fffaf1; box-shadow: inset 3px 0 0 #d66b35; }
+.due-row-missing { background: #f6f7f7; box-shadow: inset 3px 0 0 #9aa5a2; }
+.matrix-legend .never { background: #e8dff3; }
+
+/* 健檢紀錄表單：逐項勾選＋結果／備註（M6AdminPages.tsx） */
+.health-item-list { display: grid; gap: .5rem; max-height: 340px; overflow-y: auto; padding-right: .2rem; }
+.health-item-row { padding: .55rem .65rem; border: 1px solid var(--line); border-radius: 8px; background: #fbfcfb; }
+.health-item-row.inactive { opacity: .55; }
+.health-item-row em { font-style: normal; margin-left: .4rem; color: var(--orange); font-size: .68rem; font-weight: 700; }
+.health-item-detail { display: grid; grid-template-columns: 130px 1fr; gap: .5rem; margin-top: .5rem; padding-left: 1.6rem; }
+.chip-list span.result-abnormal { background: #f8dfdc; color: #9a3636; }
+.chip-list span.result-follow-up { background: #fff0d6; color: #8b5b12; }
 .employee-table { min-width: 1120px; }
 .employee-table .row-actions { flex-wrap: wrap; justify-content: flex-start; max-width: 220px; }
 
@@ -405,6 +423,7 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
   .nine-grid { min-width: 480px; grid-template-columns: 84px repeat(3, minmax(96px, 1fr)); }
   .nine-grid-cell { min-height: 64px; padding: .35rem; }
   .idp-item-fields, .idp-item-fields-employee { grid-template-columns: 1fr; }
+  .health-item-detail { grid-template-columns: 1fr; padding-left: 0; }
   .successor-row select { width: 100%; }
   .interview-score-row { grid-template-columns: 1fr 88px; }
   .interview-score-row input:nth-of-type(2) { grid-column: 1 / -1; }

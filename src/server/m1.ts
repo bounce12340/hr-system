@@ -911,7 +911,8 @@ async function listEmployees(context: ApiContext): Promise<Response> {
     SELECT e.id, e.employee_no AS employeeNo, e.name, e.email, e.department,
            e.grade, e.title, e.job_type_id AS jobTypeId,
            jt.name AS jobType, jt.required_level AS requiredLevel,
-           e.hire_date AS hireDate, e.termination_date AS terminationDate,
+           e.hire_date AS hireDate, e.birth_date AS birthDate,
+           e.termination_date AS terminationDate,
            e.status, e.salary
     FROM employees e
     JOIN job_types jt ON jt.id = e.job_type_id
@@ -935,6 +936,7 @@ interface EmployeeInput {
   title?: unknown;
   jobTypeId?: unknown;
   hireDate?: unknown;
+  birthDate?: unknown;
   terminationDate?: unknown;
   status?: unknown;
   salary?: unknown;
@@ -949,6 +951,8 @@ interface EmployeeFields {
   title: string;
   jobTypeId: string;
   hireDate: string;
+  /** 健檢頻率依《勞工健康保護規則》的年齡級距計算，故需生日；既有資料可能沒有，允許為空。 */
+  birthDate: string | null;
   terminationDate: string | null;
   status: "active" | "inactive";
   salary: number | null;
@@ -1002,6 +1006,10 @@ function parseEmployee(body: EmployeeInput): EmployeeFields {
     title: requiredString(body.title, "職稱", 100),
     jobTypeId: requiredString(body.jobTypeId, "職務類型", 100),
     hireDate,
+    // 生日可留空：既有員工資料未必有，健檢模組會將其標為「待補生日」而非套用預設間隔。
+    birthDate: body.birthDate === undefined || body.birthDate === null || body.birthDate === ""
+      ? null
+      : isoDate(body.birthDate, "生日"),
     terminationDate: status === "active" ? null : providedTerminationDate,
     status,
     salary: nullableSalary(body.salary),
@@ -1035,6 +1043,7 @@ async function getEmployeeRecord(db: D1Database, id: string): Promise<EmployeeRe
   const row = await db.prepare(`
     SELECT e.id, e.employee_no AS employeeNo, e.name, e.email, e.department, e.grade, e.title,
            e.job_type_id AS jobTypeId, jt.name AS jobType, e.hire_date AS hireDate,
+           e.birth_date AS birthDate,
            e.termination_date AS terminationDate, e.status, e.salary
     FROM employees e JOIN job_types jt ON jt.id = e.job_type_id
     WHERE e.id = ?
@@ -1053,11 +1062,12 @@ async function createEmployee(context: ApiContext): Promise<Response> {
   await context.env.DB.prepare(`
     INSERT INTO employees (
       id, employee_no, name, email, department, grade, title, job_type_id,
-      hire_date, termination_date, status, salary
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      hire_date, birth_date, termination_date, status, salary
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     id, fields.employeeNo, fields.name, fields.email, fields.department, fields.grade,
-    fields.title, fields.jobTypeId, fields.hireDate, fields.terminationDate, fields.status, fields.salary,
+    fields.title, fields.jobTypeId, fields.hireDate, fields.birthDate,
+    fields.terminationDate, fields.status, fields.salary,
   ).run();
   return json({ employee: await getEmployeeRecord(context.env.DB, id) }, 201);
 }
@@ -1082,12 +1092,13 @@ async function updateEmployee(context: ApiContext, id: string): Promise<Response
   }
   const result = await context.env.DB.prepare(`
     UPDATE employees SET employee_no = ?, name = ?, email = ?, department = ?, grade = ?, title = ?,
-      job_type_id = ?, hire_date = ?, termination_date = ?, status = ?, salary = ?,
+      job_type_id = ?, hire_date = ?, birth_date = ?, termination_date = ?, status = ?, salary = ?,
       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
     WHERE id = ?
   `).bind(
     fields.employeeNo, fields.name, fields.email, fields.department, fields.grade, fields.title,
-    fields.jobTypeId, fields.hireDate, fields.terminationDate, fields.status, fields.salary, id,
+    fields.jobTypeId, fields.hireDate, fields.birthDate,
+    fields.terminationDate, fields.status, fields.salary, id,
   ).run();
   if (result.meta.changes === 0) throw new ApiError(404, "找不到指定員工。");
   const deactivatedAccounts = fields.status === "inactive"
@@ -1214,6 +1225,7 @@ interface EmployeeProfileRecord {
   jobTypeId: string;
   jobType: string;
   hireDate: string;
+  birthDate: string | null;
   terminationDate: string | null;
   status: "active" | "inactive";
 }
@@ -1223,6 +1235,7 @@ async function getEmployeeProfile(db: D1Database, id: string): Promise<EmployeeP
   const row = await db.prepare(`
     SELECT e.id, e.employee_no AS employeeNo, e.name, e.email, e.department, e.grade, e.title,
            e.job_type_id AS jobTypeId, jt.name AS jobType, e.hire_date AS hireDate,
+           e.birth_date AS birthDate,
            e.termination_date AS terminationDate, e.status
     FROM employees e JOIN job_types jt ON jt.id = e.job_type_id
     WHERE e.id = ?
@@ -1331,6 +1344,16 @@ async function importEmployees(context: ApiContext): Promise<Response> {
       continue;
     }
 
+    // 生日是選填欄位，刻意不列入 EMPLOYEE_CSV_HEADERS：既有的範本與匯入檔沒有這欄
+    // 仍應可用。有這欄且填了值才驗證與寫入。
+    const birthDateText = row.get("生日");
+    if (birthDateText !== "" && !isValidIsoDate(birthDateText)) {
+      summary.errors.push({ row: row.rowNumber, message: "生日格式須為 YYYY-MM-DD。" });
+      summary.skipped += 1;
+      continue;
+    }
+    const birthDate = birthDateText === "" ? null : birthDateText;
+
     const jobType = await db.prepare(
       "SELECT id FROM job_types WHERE name = ?",
     ).bind(jobTypeName).first<{ id: string }>();
@@ -1359,17 +1382,22 @@ async function importEmployees(context: ApiContext): Promise<Response> {
     if (existing) {
       await db.prepare(`
         UPDATE employees SET name = ?, email = ?, department = ?, grade = ?, title = ?,
-          job_type_id = ?, hire_date = ?, salary = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          job_type_id = ?, hire_date = ?, salary = ?,
+          -- 未帶生日欄的匯入檔不應把既有生日洗掉，故以 COALESCE 保留原值。
+          birth_date = COALESCE(?, birth_date),
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE id = ?
-      `).bind(name, email, department, grade, title, jobType.id, hireDate, salary, existing.id).run();
+      `).bind(name, email, department, grade, title, jobType.id, hireDate, salary, birthDate, existing.id).run();
       summary.updated += 1;
     } else {
       await db.prepare(`
         INSERT INTO employees (
-          id, employee_no, name, email, department, grade, title, job_type_id, hire_date, salary
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, employee_no, name, email, department, grade, title, job_type_id,
+          hire_date, birth_date, salary
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(
-        uuid(), employeeNo, name, email, department, grade, title, jobType.id, hireDate, salary,
+        uuid(), employeeNo, name, email, department, grade, title, jobType.id,
+        hireDate, birthDate, salary,
       ).run();
       summary.imported += 1;
     }
