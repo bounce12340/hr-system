@@ -39,9 +39,84 @@ export function SystemSettingsPage() {
         「個人資料」頁共用同一個元件。
       */}
       <ChangePasswordPanel />
+      <MailSettingsPanel />
       <GeneralSettingsPanel />
       <JobTypesPanel />
     </section>
+  );
+}
+
+/**
+ * 寄信設定狀態與測試。
+ *
+ * AGENTMAIL_API_KEY／AGENTMAIL_INBOX_ID 是加密的 Cloudflare secret，設定後無法
+ * 讀回檢查，設錯也只會在實際寄信時才失敗。此處提供主動驗證的入口。
+ * 畫面上只顯示「是否已設定」，不顯示也不取得任何金鑰內容。
+ */
+function MailSettingsPanel() {
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [to, setTo] = useState("");
+  const [sending, setSending] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    void api<{ mailerConfigured?: boolean }>("/api/admin/settings")
+      .then((data) => setConfigured(Boolean(data.mailerConfigured)))
+      .catch(() => setConfigured(null));
+  }, []);
+
+  async function submit(event: Event) {
+    event.preventDefault();
+    setMessage("");
+    setError("");
+    setSending(true);
+    try {
+      const data = await api<{ result: { status: string }; message: string }>(
+        "/api/admin/settings/mail-test",
+        { method: "POST", ...jsonBody({ to }) },
+      );
+      if (data.result.status === "sent") setMessage(data.message);
+      else setError(data.message);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "測試信寄送失敗。");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <form class="panel section-title" onSubmit={submit}>
+      <div class="panel-heading">
+        <h2>寄信服務</h2>
+        {configured !== null && (
+          <span class={`status ${configured ? "ok" : "warning"}`}>
+            {configured ? "已設定" : "未設定"}
+          </span>
+        )}
+      </div>
+      <Message text={message} />
+      <Message text={error} error />
+      {configured === false && (
+        <div class="alert warning">
+          尚未設定寄信服務。請以 <code>wrangler pages secret put</code> 設定
+          <code>AGENTMAIL_API_KEY</code> 與 <code>AGENTMAIL_INBOX_ID</code>，設定後重新部署即生效。
+        </div>
+      )}
+      <label>
+        測試收件者
+        <input
+          type="email"
+          value={to}
+          onInput={(event) => setTo(event.currentTarget.value)}
+          placeholder="輸入你的信箱以接收測試信"
+          required
+        />
+      </label>
+      <div class="button-row">
+        <button class="primary" disabled={sending || !to}>{sending ? "寄送中…" : "寄送測試信"}</button>
+      </div>
+    </form>
   );
 }
 

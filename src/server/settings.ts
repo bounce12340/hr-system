@@ -1,4 +1,5 @@
-import { ApiError, json, parseJson, requireAdmin } from "./http";
+import { ApiError, json, parseJson, requireAdmin, requiredString } from "./http";
+import { describeMailResult, isMailerConfigured, sendMail } from "./mailer";
 import type { ApiContext } from "./types";
 
 /**
@@ -147,11 +148,42 @@ async function updateSettings(context: ApiContext): Promise<Response> {
   return json({ settings: await listSettings(context.env.DB) });
 }
 
+/**
+ * 寄送測試信，用來驗證 AGENTMAIL_API_KEY／AGENTMAIL_INBOX_ID 是否設定正確。
+ *
+ * 存在理由：這兩個值是加密的 secret，設定後無法讀回檢查，出錯時也只會在實際
+ * 寄信的當下才浮現。與其等到建立帳號時才發現通知信寄不出去，不如提供一個
+ * 可主動驗證的入口；日後輪替金鑰同樣用得到。
+ *
+ * 回應一律 200，實際結果放在 body。寄信失敗是「設定有問題」而非「請求有問題」，
+ * 用 4xx／5xx 會讓前端難以區分是端點壞了還是設定壞了。
+ */
+async function sendTestMail(context: ApiContext): Promise<Response> {
+  const body = await parseJson<{ to?: unknown }>(context.request);
+  const to = requiredString(body.to, "收件者", 200);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+    throw new ApiError(422, "收件者 Email 格式不正確。");
+  }
+  const result = await sendMail(context.env, {
+    to,
+    subject: "人資系統寄信設定測試",
+    text: "這是一封測試信。\n\n收到這封信代表人資系統的寄信設定正確，可以正常發送通知。",
+  });
+  return json({ result, message: describeMailResult(result), configured: isMailerConfigured(context.env) });
+}
+
 export async function handleAdminSettings(context: ApiContext, path: string): Promise<Response | null> {
   requireAdmin(context.user);
+  if (path === "/api/admin/settings/mail-test" && context.request.method === "POST") {
+    return sendTestMail(context);
+  }
   if (path !== "/api/admin/settings") return null;
   if (context.request.method === "GET") {
-    return json({ settings: await listSettings(context.env.DB) });
+    return json({
+      settings: await listSettings(context.env.DB),
+      // 讓設定頁能顯示寄信服務是否就緒，而不必等到實際寄信才知道。
+      mailerConfigured: isMailerConfigured(context.env),
+    });
   }
   if (context.request.method === "PATCH") {
     return updateSettings(context);
