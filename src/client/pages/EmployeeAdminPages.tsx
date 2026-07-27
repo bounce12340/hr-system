@@ -64,19 +64,26 @@ function normalizeAccountRow(raw: unknown): AdminUserAccount {
   };
 }
 
-// 建立帳號／重設密碼的回應「含 temporaryPassword」，但確切是攤平在頂層還是
-// 包在 user/account 之下，規格未逐字給定，因此兩種形狀都嘗試解析。
-function extractTemporaryPassword(raw: unknown): string {
-  if (!raw || typeof raw !== "object") return "";
-  const row = raw as Record<string, unknown>;
-  if (typeof row.temporaryPassword === "string") return row.temporaryPassword;
-  for (const key of ["user", "account", "data"]) {
-    const nested = row[key];
-    if (nested && typeof nested === "object" && typeof (nested as Record<string, unknown>).temporaryPassword === "string") {
-      return (nested as Record<string, unknown>).temporaryPassword as string;
-    }
-  }
-  return "";
+// 建立帳號／重設密碼不再回傳 temporaryPassword，改為 `{ user, mail: { status,
+// message }, setupUrl? }`：寄信成功時沒有 setupUrl，前端只顯示「已寄至 xxx」；
+// setupUrl 有值代表未設定 app_base_url 或寄信失敗，須顯示連結讓 admin 手動轉達
+// （比照原本臨時密碼「只顯示這一次」的處理）。確切是否攤平在頂層或包在
+// user/account 之下規格未逐字給定，因此兩種形狀都嘗試解析。
+interface SetupOutcome {
+  email: string;
+  setupUrl: string;
+}
+
+function extractSetupOutcome(raw: unknown, fallbackEmail: string): SetupOutcome {
+  const row = (raw ?? {}) as Record<string, unknown>;
+  const nestedUser = (row.user ?? row.account ?? {}) as Record<string, unknown>;
+  const email = typeof row.email === "string" && row.email
+    ? row.email
+    : typeof nestedUser.email === "string" && nestedUser.email
+      ? nestedUser.email
+      : fallbackEmail;
+  const setupUrl = typeof row.setupUrl === "string" ? row.setupUrl : "";
+  return { email, setupUrl };
 }
 
 function extractDeleteResult(raw: unknown): { mode: "deleted" | "archived"; auditRefCount: number; message: string } {
@@ -149,7 +156,10 @@ interface AccountModalState {
   account: AdminUserAccount | null;
   view: AccountModalView;
   role: Role;
-  revealPassword: string;
+  /** 寄信成功時使用的收件信箱（顯示「設定連結已寄至 xxx」）。 */
+  revealEmail: string;
+  /** 未設定 app_base_url 或寄信失敗時，後端回傳的一次性連結；空字串代表寄信已成功。 */
+  revealSetupUrl: string;
   revealContext: "create" | "reset";
   copied: boolean;
   busy: boolean;
@@ -369,7 +379,8 @@ export function EmployeeManagementPage() {
       account,
       view: "manage",
       role: account?.role ?? "employee",
-      revealPassword: "",
+      revealEmail: "",
+      revealSetupUrl: "",
       revealContext: "create",
       copied: false,
       busy: false,
@@ -392,9 +403,17 @@ export function EmployeeManagementPage() {
         method: "POST",
         ...jsonBody({ employeeId: employee.id, role }),
       });
-      const password = extractTemporaryPassword(data);
+      const outcome = extractSetupOutcome(data, employee.email);
       await loadAccounts();
-      setAccountModal((current) => (current ? { ...current, busy: false, view: "reveal", revealContext: "create", revealPassword: password, copied: false } : current));
+      setAccountModal((current) => (current ? {
+        ...current,
+        busy: false,
+        view: "reveal",
+        revealContext: "create",
+        revealEmail: outcome.email,
+        revealSetupUrl: outcome.setupUrl,
+        copied: false,
+      } : current));
     } catch (caught) {
       setAccountModal((current) => (current ? { ...current, busy: false, error: actionErrorMessage(caught, "建立帳號失敗。") } : current));
     }
@@ -438,9 +457,17 @@ export function EmployeeManagementPage() {
         method: "POST",
         ...jsonBody({}),
       });
-      const password = extractTemporaryPassword(data);
+      const outcome = extractSetupOutcome(data, accountModal.account.email);
       await loadAccounts();
-      setAccountModal((current) => (current ? { ...current, busy: false, view: "reveal", revealContext: "reset", revealPassword: password, copied: false } : current));
+      setAccountModal((current) => (current ? {
+        ...current,
+        busy: false,
+        view: "reveal",
+        revealContext: "reset",
+        revealEmail: outcome.email,
+        revealSetupUrl: outcome.setupUrl,
+        copied: false,
+      } : current));
     } catch (caught) {
       setAccountModal((current) => (current ? { ...current, busy: false, error: actionErrorMessage(caught, "重設密碼失敗。") } : current));
     }
@@ -468,13 +495,13 @@ export function EmployeeManagementPage() {
     }
   }
 
-  async function copyRevealedPassword() {
-    if (!accountModal?.revealPassword) return;
+  async function copyRevealedSetupUrl() {
+    if (!accountModal?.revealSetupUrl) return;
     try {
-      await navigator.clipboard.writeText(accountModal.revealPassword);
+      await navigator.clipboard.writeText(accountModal.revealSetupUrl);
       setAccountModal((current) => (current ? { ...current, copied: true } : current));
     } catch {
-      setAccountModal((current) => (current ? { ...current, error: "自動複製失敗，請手動選取密碼文字複製。" } : current));
+      setAccountModal((current) => (current ? { ...current, error: "自動複製失敗，請手動選取連結文字複製。" } : current));
     }
   }
 
@@ -717,18 +744,37 @@ export function EmployeeManagementPage() {
             <Message text={accountModal.error} error />
             {accountModal.view === "reveal" ? (
               <div class="password-reveal">
-                <p>{accountModal.revealContext === "create" ? "帳號已建立，這是系統產生的臨時密碼：" : "密碼已重設，這是新的臨時密碼："}</p>
-                <div class="password-reveal-box">
-                  <code>{accountModal.revealPassword || "（未取得密碼，請改用「重設密碼」重新產生）"}</code>
-                  <button type="button" class="secondary" disabled={!accountModal.revealPassword} onClick={() => void copyRevealedPassword()}>
-                    {accountModal.copied ? "已複製" : "複製"}
-                  </button>
-                </div>
-                <div class="alert warning">
-                  此密碼只會顯示這一次，請立即複製並轉交給「{accountModal.employee.name}」。視窗關閉後將無法再從任何地方取得，若日後遺失請使用「重設密碼」重新產生。
-                </div>
+                {accountModal.revealSetupUrl ? (
+                  <>
+                    <p>
+                      {accountModal.revealContext === "create" ? "帳號已建立" : "密碼已重設"}
+                      ，但系統目前無法寄出設定密碼信（尚未設定寄信服務，或寄信失敗），請將以下連結手動轉達給「{accountModal.employee.name}」：
+                    </p>
+                    <div class="password-reveal-box">
+                      {/* 未設定 app_base_url 時後端回傳相對路徑，瀏覽器會依目前頁面（同網域的
+                          管理後台）解析成完整網址；點開即可直接測試，複製後貼給對方轉達也可以。 */}
+                      <a href={accountModal.revealSetupUrl} target="_blank" rel="noopener noreferrer">
+                        <code>{accountModal.revealSetupUrl}</code>
+                      </a>
+                      <button type="button" class="secondary" onClick={() => void copyRevealedSetupUrl()}>
+                        {accountModal.copied ? "已複製" : "複製連結"}
+                      </button>
+                    </div>
+                    <div class="alert warning">
+                      此連結只會顯示這一次，請立即複製並轉交。視窗關閉後將無法再從任何地方取得，若日後遺失請使用「重設密碼」重新產生。
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p>{accountModal.revealContext === "create" ? "帳號已建立。" : "密碼已重設。"}</p>
+                    <div class="alert success">設定連結已寄至 {accountModal.revealEmail || "該員工的信箱"}。</div>
+                    <p class="muted-copy">請提醒「{accountModal.employee.name}」至信箱查看（含垃圾信件匣），點擊連結即可自行設定密碼。</p>
+                  </>
+                )}
                 <div class="modal-actions">
-                  <button class="primary" onClick={closeAccountModal}>我已複製，關閉視窗</button>
+                  <button class="primary" onClick={closeAccountModal}>
+                    {accountModal.revealSetupUrl ? "我已複製，關閉視窗" : "關閉"}
+                  </button>
                 </div>
               </div>
             ) : accountModal.account ? (

@@ -5,7 +5,8 @@ import { beforeAll, describe, expect, it } from "vitest";
  * 登入帳號生命週期管理（src/server/accounts.ts）。
  *
  * 這批測試的重點不在 CRUD 形狀，而在三件會直接影響存取控制的事：
- *   1. 臨時密碼由系統產生、只回一次，而且真的能登入（不是產生一組沒人用得了的字串）。
+ *   1. 建立帳號不再產生任何明碼密碼，改回傳一次性設定連結；密碼由本人設定後才登得進來。
+ *      （連結本身的安全性——只存雜湊、單次使用、過期——在 test/password-setup.test.ts。）
  *   2. 停用／封存必須讓「既有 session 立刻失效」，不是等 cookie 自然過期。
  *   3. 標記員工離職要連動停用帳號；復職不自動還權；admin 不能把自己鎖在外面。
  */
@@ -29,7 +30,10 @@ interface Account {
 }
 
 interface CreateAccountResponse extends Account {
-  temporaryPassword: string;
+  /** 契約形狀：{ user, mail: { status, message }, setupUrl? }。已不再有 temporaryPassword。 */
+  user: Account;
+  mail: { status: "sent" | "skipped" | "failed"; message: string };
+  setupUrl?: string;
 }
 
 interface EmployeeRecord {
@@ -39,7 +43,8 @@ interface EmployeeRecord {
   status: "active" | "inactive";
 }
 
-const STRONG_PASSWORD = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{10,}$/;
+/** 測試環境沒有設 app_base_url，因此建立帳號一律回傳相對路徑的 setupUrl。 */
+const SETUP_PASSWORD = "OwnerChosen1234!";
 
 let adminCookie = "";
 let employeeCookie = "";
@@ -107,6 +112,34 @@ async function createAccount(employeeId: string, role: "admin" | "employee" = "e
   return account;
 }
 
+function tokenFrom(setupUrl: string | undefined): string {
+  expect(setupUrl, "建立帳號／重設密碼應回傳 setupUrl").toBeTruthy();
+  return new URL(setupUrl ?? "", "https://example.com").searchParams.get("setup") ?? "";
+}
+
+/**
+ * 新流程沒有臨時密碼：帳號建立後密碼是一組沒有人知道的隨機值，
+ * 必須由本人用一次性連結設定過才登得進來。這支就是測試裡的「本人」。
+ */
+async function activate(setupUrl: string | undefined, password = SETUP_PASSWORD): Promise<void> {
+  const done = await call("/api/auth/password-setup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: tokenFrom(setupUrl), newPassword: password }),
+  });
+  expect(done.response.status).toBe(200);
+}
+
+/** 建立帳號並立刻完成密碼設定，回傳可直接登入的帳號。 */
+async function createUsableAccount(
+  employeeId: string,
+  role: "admin" | "employee" = "employee",
+): Promise<CreateAccountResponse> {
+  const account = await createAccount(employeeId, role);
+  await activate(account.setupUrl);
+  return account;
+}
+
 async function sessionCount(userId: string): Promise<number> {
   const row = await env.DB.prepare("SELECT COUNT(*) AS count FROM sessions WHERE user_id = ?")
     .bind(userId).first<{ count: number }>();
@@ -118,41 +151,59 @@ beforeAll(async () => {
   employeeCookie = await loginAndChange("chiahao.lin@demo.local", "EmployeeAccountsChanged1234!");
 });
 
-describe("建立帳號與臨時密碼", () => {
-  it("臨時密碼由系統產生、通過強度規則，且真的能登入", async () => {
+describe("建立帳號與密碼設定連結", () => {
+  it("回應不含任何明碼密碼，改帶 mail 狀態與一次性設定連結", async () => {
     const employee = await createEmployee();
     const account = await createAccount(employee.id);
 
-    expect(account.temporaryPassword).toMatch(STRONG_PASSWORD);
+    // 舊的 temporaryPassword 行為已完整移除，不保留相容欄位。
+    expect("temporaryPassword" in account).toBe(false);
+    expect(JSON.stringify(account)).not.toContain("temporaryPassword");
+
+    expect(account.mail.status).toBe("skipped"); // 測試環境未設 app_base_url
+    expect(account.mail.message).toBeTruthy();
+    expect(account.setupUrl).toBeTruthy();
     expect(account.mustChangePassword).toBe(true);
     expect(account.active).toBe(true);
     expect(account.email).toBe(employee.email);
     expect(account.employeeId).toBe(employee.id);
+    expect(account.user.id).toBe(account.id);
+  });
 
-    const login = await loginRaw(employee.email, account.temporaryPassword);
+  it("設定連結使用前登不進來，本人設定密碼後才能登入", async () => {
+    const employee = await createEmployee();
+    const account = await createAccount(employee.id);
+
+    // 密碼欄位是一組無法通過驗證的隨機值，任何輸入都登不進來。
+    expect((await loginRaw(employee.email, SETUP_PASSWORD)).status).toBe(401);
+
+    await activate(account.setupUrl);
+    const login = await loginRaw(employee.email, SETUP_PASSWORD);
     expect(login.status).toBe(200);
     const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
     const me = await call<{ user: { mustChangePassword: boolean } }>("/api/auth/me", {
       headers: { Cookie: cookie },
     });
     expect(me.response.status).toBe(200);
-    expect(me.body.data?.user.mustChangePassword).toBe(true);
+    // 密碼是本人設定的，沒有理由再強迫改一次。
+    expect(me.body.data?.user.mustChangePassword).toBe(false);
   });
 
-  it("兩次建立的臨時密碼不同，且明碼沒有落在資料庫任何欄位", async () => {
+  it("兩次建立的連結不同，且 token 原文沒有落在資料庫任何地方", async () => {
     const first = await createAccount((await createEmployee()).id);
     const second = await createAccount((await createEmployee()).id);
-    expect(first.temporaryPassword).not.toBe(second.temporaryPassword);
+    const firstToken = tokenFrom(first.setupUrl);
+    expect(firstToken).not.toBe(tokenFrom(second.setupUrl));
 
-    // 明碼只在回應出現一次：users 列與 audit_logs 都不得留下痕跡。
+    // token 原文只出現在回應／信件；users 與 audit_logs 都不得留下痕跡。
     const stored = await env.DB.prepare(
       "SELECT password_hash AS hash, password_salt AS salt FROM users WHERE id = ?",
     ).bind(first.id).first<{ hash: string; salt: string }>();
-    expect(stored?.hash).not.toBe(first.temporaryPassword);
-    expect(stored?.salt).not.toBe(first.temporaryPassword);
+    expect(stored?.hash).not.toContain(firstToken);
+    expect(stored?.salt).not.toContain(firstToken);
     const leaked = await env.DB.prepare(
       "SELECT COUNT(*) AS count FROM audit_logs WHERE details LIKE ?",
-    ).bind(`%${first.temporaryPassword}%`).first<{ count: number }>();
+    ).bind(`%${firstToken}%`).first<{ count: number }>();
     expect(leaked?.count).toBe(0);
   });
 
@@ -200,8 +251,8 @@ describe("建立帳號與臨時密碼", () => {
 describe("停用與重設密碼", () => {
   it("停用後既有 session 立刻失效（session 列被刪除，不是等過期）", async () => {
     const employee = await createEmployee();
-    const account = await createAccount(employee.id);
-    const login = await loginRaw(employee.email, account.temporaryPassword);
+    const account = await createUsableAccount(employee.id);
+    const login = await loginRaw(employee.email, SETUP_PASSWORD);
     const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
     expect((await call("/api/auth/me", { headers: { Cookie: cookie } })).response.status).toBe(200);
     expect(await sessionCount(account.id)).toBe(1);
@@ -220,9 +271,9 @@ describe("停用與重設密碼", () => {
 
   it("停用後無法用原密碼登入，重新啟用後可以", async () => {
     const employee = await createEmployee();
-    const account = await createAccount(employee.id);
+    const account = await createUsableAccount(employee.id);
     await call(`/api/admin/users/${account.id}`, adminJson("PATCH", { active: false }));
-    expect((await loginRaw(employee.email, account.temporaryPassword)).status).toBe(401);
+    expect((await loginRaw(employee.email, SETUP_PASSWORD)).status).toBe(401);
 
     const enabled = await call<{ active: boolean }>(
       `/api/admin/users/${account.id}`,
@@ -230,13 +281,13 @@ describe("停用與重設密碼", () => {
     );
     expect(enabled.response.status).toBe(200);
     expect(enabled.body.data?.active).toBe(true);
-    expect((await loginRaw(employee.email, account.temporaryPassword)).status).toBe(200);
+    expect((await loginRaw(employee.email, SETUP_PASSWORD)).status).toBe(200);
   });
 
-  it("重設密碼回傳新臨時密碼，舊密碼與舊 session 同時失效", async () => {
+  it("重設密碼發出新的設定連結，舊密碼與舊 session 同時失效", async () => {
     const employee = await createEmployee();
-    const account = await createAccount(employee.id);
-    const login = await loginRaw(employee.email, account.temporaryPassword);
+    const account = await createUsableAccount(employee.id);
+    const login = await loginRaw(employee.email, SETUP_PASSWORD);
     const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
     expect(await sessionCount(account.id)).toBe(1);
 
@@ -245,15 +296,19 @@ describe("停用與重設密碼", () => {
       adminJson("POST"),
     );
     expect(reset.response.status).toBe(200);
-    const newPassword = reset.body.data?.temporaryPassword ?? "";
-    expect(newPassword).toMatch(STRONG_PASSWORD);
-    expect(newPassword).not.toBe(account.temporaryPassword);
+    // 重設密碼同樣不再回傳任何明碼密碼。
+    expect(JSON.stringify(reset.body.data)).not.toContain("temporaryPassword");
+    expect(reset.body.data?.mail.status).toBe("skipped");
     expect(reset.body.data?.mustChangePassword).toBe(true);
 
+    // 舊密碼與舊 session 當場失效，新密碼要等本人用連結設定完才生效。
     expect(await sessionCount(account.id)).toBe(0);
     expect((await call("/api/auth/me", { headers: { Cookie: cookie } })).response.status).toBe(401);
-    expect((await loginRaw(employee.email, account.temporaryPassword)).status).toBe(401);
-    expect((await loginRaw(employee.email, newPassword)).status).toBe(200);
+    expect((await loginRaw(employee.email, SETUP_PASSWORD)).status).toBe(401);
+
+    await activate(reset.body.data?.setupUrl, "ResetByOwner4321!");
+    expect((await loginRaw(employee.email, "ResetByOwner4321!")).status).toBe(200);
+    expect((await loginRaw(employee.email, SETUP_PASSWORD)).status).toBe(401);
   });
 
   it("找不到的帳號一律 404", async () => {
@@ -266,8 +321,8 @@ describe("停用與重設密碼", () => {
 describe("離職連動", () => {
   it("標記離職自動停用帳號並刪除 session；復職不自動啟用", async () => {
     const employee = await createEmployee();
-    const account = await createAccount(employee.id);
-    const login = await loginRaw(employee.email, account.temporaryPassword);
+    const account = await createUsableAccount(employee.id);
+    const login = await loginRaw(employee.email, SETUP_PASSWORD);
     const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
     expect(await sessionCount(account.id)).toBe(1);
 
@@ -291,7 +346,7 @@ describe("離職連動", () => {
 
     expect(await sessionCount(account.id)).toBe(0);
     expect((await call("/api/auth/me", { headers: { Cookie: cookie } })).response.status).toBe(401);
-    expect((await loginRaw(employee.email, account.temporaryPassword)).status).toBe(401);
+    expect((await loginRaw(employee.email, SETUP_PASSWORD)).status).toBe(401);
 
     // 復職：員工狀態改回在職，但帳號刻意維持停用，必須由 admin 明確啟用。
     const reinstated = await call(`/api/admin/employees/${employee.id}`, adminJson("PATCH", {
@@ -306,7 +361,7 @@ describe("離職連動", () => {
       status: "active",
     }));
     expect(reinstated.response.status).toBe(200);
-    expect((await loginRaw(employee.email, account.temporaryPassword)).status).toBe(401);
+    expect((await loginRaw(employee.email, SETUP_PASSWORD)).status).toBe(401);
 
     const list = await call<{ users: Account[] }>("/api/admin/users", { headers: { Cookie: adminCookie } });
     expect(list.body.data?.users.find((item) => item.id === account.id)?.active).toBe(false);
@@ -350,7 +405,7 @@ describe("不可自我停權", () => {
 describe("刪除或封存", () => {
   it("無稽核關聯的帳號直接實刪", async () => {
     const employee = await createEmployee();
-    const account = await createAccount(employee.id);
+    const account = await createUsableAccount(employee.id);
     const removed = await call<{ mode: string; auditRefCount: number }>(
       `/api/admin/users/${account.id}`,
       adminJson("DELETE"),
@@ -361,12 +416,17 @@ describe("刪除或封存", () => {
 
     const row = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(account.id).first();
     expect(row).toBeNull();
-    expect((await loginRaw(employee.email, account.temporaryPassword)).status).toBe(401);
+    expect((await loginRaw(employee.email, SETUP_PASSWORD)).status).toBe(401);
+    // 未使用的設定連結應隨帳號一起消失（ON DELETE CASCADE）。
+    const tokens = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM password_setup_tokens WHERE user_id = ?",
+    ).bind(account.id).first<{ count: number }>();
+    expect(tokens?.count).toBe(0);
   });
 
   it("有稽核關聯的帳號改為封存：無法登入、稽核列保留、同一員工可重新建帳號", async () => {
     const employee = await createEmployee();
-    const account = await createAccount(employee.id);
+    const account = await createUsableAccount(employee.id);
     // 兩種關聯各一筆：audit_logs（nullable FK）與 special_days（NOT NULL FK，真的刪不掉）。
     await env.DB.batch([
       env.DB.prepare(`
@@ -414,17 +474,17 @@ describe("刪除或封存", () => {
     expect(audit?.actor).toBe(account.id);
 
     // 封存後不得能登入（原密碼、封存後的匿名信箱都不行），清單也不再出現。
-    expect((await loginRaw(employee.email, account.temporaryPassword)).status).toBe(401);
-    expect((await loginRaw(row?.email ?? "", account.temporaryPassword)).status).toBe(401);
+    expect((await loginRaw(employee.email, SETUP_PASSWORD)).status).toBe(401);
+    expect((await loginRaw(row?.email ?? "", SETUP_PASSWORD)).status).toBe(401);
     const after = await call<{ users: Account[] }>("/api/admin/users", { headers: { Cookie: adminCookie } });
     expect(after.body.data?.users.some((item) => item.id === account.id)).toBe(false);
     expect((await call(`/api/admin/users/${account.id}`, adminJson("PATCH", { active: true }))).response.status).toBe(404);
 
     // 同一員工可重新建立帳號（email 與 employee_id 都已釋出）。
-    const recreated = await createAccount(employee.id);
+    const recreated = await createUsableAccount(employee.id);
     expect(recreated.id).not.toBe(account.id);
     expect(recreated.email).toBe(employee.email);
-    expect((await loginRaw(employee.email, recreated.temporaryPassword)).status).toBe(200);
+    expect((await loginRaw(employee.email, SETUP_PASSWORD)).status).toBe(200);
   });
 });
 

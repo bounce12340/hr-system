@@ -14,6 +14,7 @@ import { handleAdminM2, handleEmployeeM2 } from "./m2";
 import { handleAdminM3 } from "./m3";
 import { handleAdminM4 } from "./m4";
 import { handleAdminM5, handleEmployeeM5 } from "./m5";
+import { handlePublicPasswordSetup } from "./password-setup";
 import { handleAdminSettings } from "./settings";
 import type { ApiContext } from "./types";
 
@@ -46,6 +47,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       const result = await login(request, env.DB);
       return json({ user: result.user }, 200, { "Set-Cookie": result.cookie });
     }
+    // 密碼設定連結與忘記密碼是公開端點，必須擺在 authenticate 之前：
+    // 會用到它們的人正是還沒有密碼、登不進來的人。放在這裡也順便省掉一次
+    // 不可能命中的 session 查詢。
+    const publicSetupResponse = await handlePublicPasswordSetup(request, env, path);
+    if (publicSetupResponse) return publicSetupResponse;
 
     const user = await authenticate(request, env.DB);
     const context: ApiContext = { request, env, url, user };

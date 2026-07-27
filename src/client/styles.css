@@ -56,6 +56,8 @@ input, select, textarea { width: 100%; border: 1px solid #cad5cf; border-radius:
 input:focus, select:focus, textarea:focus { border-color: var(--green-2); box-shadow: 0 0 0 3px rgba(29, 103, 93, .12); }
 textarea { min-height: 92px; resize: vertical; }
 .demo-hint { margin-top: 1.5rem; padding: .8rem; background: #f4f7f4; color: var(--muted); font-size: .78rem; border-radius: 9px; max-width: 420px; }
+.login-link-button { display: block; background: transparent; border: 0; padding: 0; margin-top: 1rem; color: var(--green-2); font-weight: 700; text-decoration: underline; text-align: left; }
+.login-link-button:hover { color: var(--green); }
 
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 230px 1fr; }
 .sidebar { position: sticky; top: 0; height: 100vh; background: #103d38; color: white; padding: 1.5rem 1rem; display: flex; flex-direction: column; }
@@ -232,6 +234,8 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
 .password-reveal { display: grid; gap: .9rem; }
 .password-reveal-box { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; padding: .9rem 1rem; background: #eef4f1; border: 2px dashed var(--green-2); border-radius: 10px; }
 .password-reveal-box code { flex: 1 1 auto; min-width: 0; font: 700 1.1rem/1.35 "Plus Jakarta Sans", monospace; letter-spacing: .03em; word-break: break-all; color: var(--green); }
+.password-reveal-box a { flex: 1 1 auto; min-width: 0; text-decoration: none; }
+.password-reveal-box a code { display: block; }
 .responsibility-list { margin: .5rem 0 0; padding-left: 1.1rem; }
 .responsibility-list li { margin-bottom: .3rem; }
 .attendance-record-table { min-width: 920px; }

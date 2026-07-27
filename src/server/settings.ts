@@ -59,6 +59,40 @@ async function listSettings(db: D1Database): Promise<PublicSetting[]> {
 const NUMBER_RANGES: Record<string, { min: number; max: number }> = {
   // 健檢提前提醒月數，需求明訂限制 1～3（migrations/0011_health_check.sql）。
   health_check_reminder_months: { min: 1, max: 3 },
+  // 密碼設定連結有效時數，需求明訂限制 1～72（migrations/0012_password_setup_tokens.sql）。
+  password_setup_token_hours: { min: 1, max: 72 },
+};
+
+/**
+ * 少數字串設定除了長度以外還有格式要求。回傳正規化後的值（會被寫入資料庫）。
+ * 空字串一律代表「未設定」，必須放行——app_base_url 就是靠空值來表達
+ * 「還沒設定對外網址，不要寄信」。
+ */
+const STRING_NORMALIZERS: Record<string, (value: string, key: string) => string> = {
+  /**
+   * 系統對外網址。這個值會被拿去組密碼設定連結（password-setup.ts），
+   * 也就是使用者會在上面輸入新密碼的網域，因此格式必須嚴格把關：
+   *   - 只接受 http／https，擋掉 javascript: 這類會變成 XSS 的 scheme。
+   *   - 不接受路徑／query／fragment：連結格式固定是 `{app_base_url}/?setup={token}`，
+   *     多出來的部分只會組出打不開的網址。
+   *   - 去掉結尾斜線，避免組出 `//?setup=`。
+   */
+  app_base_url: (value, key) => {
+    if (value === "") return "";
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      throw new ApiError(422, `設定「${key}」須為完整網址，例如 https://hr.example.com。`);
+    }
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      throw new ApiError(422, `設定「${key}」只接受 http:// 或 https:// 開頭的網址。`);
+    }
+    if (parsed.search || parsed.hash || parsed.pathname.replace(/\/+$/, "") !== "") {
+      throw new ApiError(422, `設定「${key}」只能填網域（例如 https://hr.example.com），不可包含路徑或參數。`);
+    }
+    return `${parsed.protocol}//${parsed.host}`;
+  },
 };
 
 function coerceIn(value: unknown, valueType: ValueType, key: string): string {
@@ -97,7 +131,7 @@ function coerceIn(value: unknown, valueType: ValueType, key: string): string {
       if (trimmed.length > 2000) {
         throw new ApiError(422, `設定「${key}」不可超過 2000 字。`);
       }
-      return trimmed;
+      return STRING_NORMALIZERS[key]?.(trimmed, key) ?? trimmed;
     }
   }
 }

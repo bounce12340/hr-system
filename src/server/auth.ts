@@ -181,62 +181,18 @@ export function assertPasswordStrength(password: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// 系統產生的臨時密碼（登入帳號生命週期管理：建立帳號／重設密碼）
+// 密碼憑證（登入帳號生命週期管理：建立帳號／重設密碼／一次性設定連結）
 // ---------------------------------------------------------------------------
 
-/** 去掉 l／I／O／0／1 等易混淆字元，臨時密碼需要人工轉達一次。 */
-const TEMP_LOWER = "abcdefghijkmnopqrstuvwxyz";
-const TEMP_UPPER = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-const TEMP_DIGIT = "23456789";
-const TEMP_SYMBOL = "!@#$%^&*?-_=+";
-const TEMP_ALPHABET = TEMP_LOWER + TEMP_UPPER + TEMP_DIGIT + TEMP_SYMBOL;
-const TEMP_PASSWORD_LENGTH = 16;
-
-/**
- * 以 crypto.getRandomValues 取 [0, maxExclusive) 的均勻整數。
- * 用拒絕取樣（丟掉尾端不完整區間）而非直接取模，避免模偏差讓前幾個字元機率偏高。
- * 一律不使用 Math.random：它非密碼學安全，且在同一 isolate 內可被觀察後預測。
- */
-function randomIndex(maxExclusive: number): number {
-  const limit = Math.floor(0x1_0000_0000 / maxExclusive) * maxExclusive;
-  const buffer = new Uint32Array(1);
-  for (;;) {
-    crypto.getRandomValues(buffer);
-    const value = buffer[0] ?? 0;
-    if (value < limit) return value % maxExclusive;
-  }
-}
-
-function randomChar(alphabet: string): string {
-  return alphabet.charAt(randomIndex(alphabet.length));
-}
-
-/**
- * 產生 16 碼臨時密碼。先各取一個小寫／大寫／數字／符號保證必定通過
- * assertPasswordStrength，其餘由完整字集補滿後整體洗牌，避免固定樣式
- * （例如「前四碼一定是小寫大寫數字符號」）洩漏結構。
+/*
+ * 這裡曾經有一支 generateTemporaryPassword()：建立帳號與重設密碼會產生 16 碼
+ * 明碼臨時密碼放進 HTTP 回應，由 admin 人工轉達。整支已移除，不保留相容路徑。
  *
- * 呼叫端必須把回傳值只放進「當次 HTTP 回應」，不得寫入資料庫或日誌。
+ * 移除理由：一旦這組明碼要靠 email 送達，它就會永久留在收件匣、被轉寄、進備份，
+ * 密碼的生命週期完全脫離系統控制。現在的做法是帳號一律先填入 unusableCredentials()，
+ * 再寄出一次性設定連結由本人自行設定（見 src/server/password-setup.ts）。
+ * 系統中不再有任何會產生「需要人工轉達的明碼密碼」的路徑。
  */
-export function generateTemporaryPassword(): string {
-  const characters = [
-    randomChar(TEMP_LOWER),
-    randomChar(TEMP_UPPER),
-    randomChar(TEMP_DIGIT),
-    randomChar(TEMP_SYMBOL),
-  ];
-  while (characters.length < TEMP_PASSWORD_LENGTH) characters.push(randomChar(TEMP_ALPHABET));
-  for (let index = characters.length - 1; index > 0; index -= 1) {
-    const target = randomIndex(index + 1);
-    const current = characters[index] ?? "";
-    characters[index] = characters[target] ?? "";
-    characters[target] = current;
-  }
-  const password = characters.join("");
-  // 防禦性：字集或長度日後被改動而不再滿足強度規則時，在此就炸掉而不是產生弱密碼。
-  assertPasswordStrength(password);
-  return password;
-}
 
 export interface PasswordCredentials {
   hash: string;
@@ -303,5 +259,6 @@ export async function changePassword(
 }
 
 // 帳號的建立／停用／重設密碼／刪除都移到 src/server/accounts.ts，
+// 一次性密碼設定連結在 src/server/password-setup.ts，
 // 本檔只保留登入、session 與密碼原語（derivePassword／hashPassword／
-// generateTemporaryPassword／unusableCredentials）。
+// unusableCredentials／assertPasswordStrength）。

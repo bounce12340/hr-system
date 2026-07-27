@@ -1,5 +1,6 @@
-import { generateTemporaryPassword, hashPassword, unusableCredentials } from "./auth";
+import { unusableCredentials } from "./auth";
 import { ApiError, json, parseJson, requireAdmin, requiredString, uuid } from "./http";
+import { issuePasswordSetup, type PasswordSetupDelivery } from "./password-setup";
 import type { ApiContext, AuthUser, Role } from "./types";
 
 /**
@@ -7,9 +8,10 @@ import type { ApiContext, AuthUser, Role } from "./types";
  *
  * 三個關鍵決策，改動前請先讀完：
  *
- * 1. 臨時密碼只出現一次。建立帳號與重設密碼都由系統以 crypto.getRandomValues 產生
- *    （見 auth.ts generateTemporaryPassword），只寫入 PBKDF2 雜湊，明碼僅放進當次
- *    HTTP 回應。本檔刻意沒有任何「再取一次臨時密碼」的端點，也不寫進 audit_logs.details。
+ * 1. 系統不再產生任何明碼密碼。建立帳號與重設密碼都只寫入一組**無法通過驗證**的
+ *    隨機憑證（auth.ts unusableCredentials），真正的密碼由本人透過一次性設定連結
+ *    自行設定（見 password-setup.ts）。舊版會回傳 temporaryPassword 讓 admin 轉達，
+ *    已完整移除、不保留相容路徑：只要明碼存在過，它就會被截圖、轉貼、留在信箱裡。
  *
  * 2. 停用等於立即失效，不是等 session 過期。users.active 雖已在登入
  *    （auth.ts loadUserByEmail）與 session 驗證（auth.ts authenticate）兩處被檢查，
@@ -181,8 +183,8 @@ function parseRole(value: unknown): Role {
 }
 
 /**
- * 建立登入帳號。臨時密碼由系統產生（呼叫端送 temporaryPassword 會被忽略），
- * email 省略時沿用員工主檔的聯絡信箱。
+ * 建立登入帳號。密碼欄位先填入無法通過驗證的隨機憑證，帳號在本人用設定連結
+ * 設好密碼之前登不進來；email 省略時沿用員工主檔的聯絡信箱。
  */
 async function createAccount(context: ApiContext, admin: AuthUser): Promise<Response> {
   const db = context.env.DB;
@@ -216,8 +218,9 @@ async function createAccount(context: ApiContext, admin: AuthUser): Promise<Resp
   ).bind(email).first();
   if (emailTaken) throw new ApiError(409, "此電子郵件已被其他帳號使用。");
 
-  const temporaryPassword = generateTemporaryPassword();
-  const credentials = await hashPassword(temporaryPassword);
+  // 帳號一建立就有一組沒有人知道（也不可能猜到）的密碼，must_change_password = 1
+  // 標記「尚未由本人設定過」。在設定連結被使用之前，這個帳號登不進來。
+  const credentials = unusableCredentials();
   const id = uuid();
   try {
     await db.batch([
@@ -229,15 +232,43 @@ async function createAccount(context: ApiContext, admin: AuthUser): Promise<Resp
       `).bind(
         id, employeeId, email, credentials.hash, credentials.salt, credentials.iterations, role,
       ),
-      // details 只記角色，不記臨時密碼。
-      auditLog(db, admin.id, "user.create", id, { employeeId, role }),
+      // details 只記角色與 email 派送方式，絕不記 token 或任何密碼。
+      auditLog(db, admin.id, "user.create", id, { employeeId, role, credentialDelivery: "setup_link" }),
     ]);
   } catch {
     throw new ApiError(409, "此員工或電子郵件已有帳號。");
   }
 
   const account = await getAccount(db, id);
-  return json({ ...account, user: account, temporaryPassword }, 201);
+  return withSetupDelivery(
+    account,
+    await issuePasswordSetup(context.env, db, { id, email }, "account_setup"),
+    201,
+  );
+}
+
+/**
+ * 建立帳號與重設密碼共用的回應組裝。
+ *
+ * 契約形狀是 `{ user, mail: { status, message }, setupUrl? }`；帳號欄位同時攤平在
+ * 頂層是沿用舊版行為（前端的容錯解析兩種都吃）。setupUrl 只在信沒有真的寄出去時
+ * 才出現——寄成功了就沒有理由讓連結多留一份在 admin 畫面上。
+ *
+ * 寄信結果一律以 200／201 回應：帳號在這之前已經寫進資料庫了，用 5xx 表達
+ * 「信沒寄成功」會讓 admin 誤判整件事失敗而重試，反而製造重複帳號。
+ */
+function withSetupDelivery(
+  account: PublicAccount,
+  delivery: PasswordSetupDelivery,
+  status: number,
+): Response {
+  return json({
+    ...account,
+    user: account,
+    mail: delivery.mail,
+    setupExpiresAt: delivery.expiresAt,
+    ...(delivery.setupUrl ? { setupUrl: delivery.setupUrl } : {}),
+  }, status);
 }
 
 /**
@@ -283,15 +314,17 @@ async function updateAccount(context: ApiContext, admin: AuthUser, id: string): 
 }
 
 /**
- * 重設密碼。新的臨時密碼同樣只在此回應出現一次，並且：
- *   must_change_password = 1（下次登入強制改）、刪除所有既有 sessions
- *   （舊密碼配發出去的登入狀態必須一併作廢）。
+ * 重設密碼。舊密碼立刻換成無法通過驗證的隨機憑證（而不是換成另一組明碼臨時密碼），
+ * 並且 must_change_password = 1、刪除所有既有 sessions——舊密碼配發出去的登入狀態
+ * 必須一併作廢，否則「重設密碼」擋不住已經在線上的人。
+ *
+ * 新密碼由本人透過一次性設定連結自行設定。注意這代表帳號在連結被使用之前是
+ * 登不進來的：這是刻意的取捨，重設密碼的情境本來就假設舊密碼已不可信。
  */
 async function resetPassword(context: ApiContext, admin: AuthUser, id: string): Promise<Response> {
   const db = context.env.DB;
-  await getAccount(db, id);
-  const temporaryPassword = generateTemporaryPassword();
-  const credentials = await hashPassword(temporaryPassword);
+  const target = await getAccount(db, id);
+  const credentials = unusableCredentials();
   await db.batch([
     db.prepare(`
       UPDATE users
@@ -299,10 +332,14 @@ async function resetPassword(context: ApiContext, admin: AuthUser, id: string): 
       WHERE id = ?
     `).bind(credentials.hash, credentials.salt, credentials.iterations, id),
     deleteSessions(db, id),
-    auditLog(db, admin.id, "user.reset_password", id, {}),
+    auditLog(db, admin.id, "user.reset_password", id, { credentialDelivery: "setup_link" }),
   ]);
   const account = await getAccount(db, id);
-  return json({ ...account, user: account, temporaryPassword });
+  return withSetupDelivery(
+    account,
+    await issuePasswordSetup(context.env, db, { id, email: target.email }, "password_reset"),
+    200,
+  );
 }
 
 async function auditRefCount(db: D1Database, id: string): Promise<number> {
