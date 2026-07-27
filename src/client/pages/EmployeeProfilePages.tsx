@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, jsonBody } from "../api";
+import { ChangePasswordPanel } from "../components/ChangePasswordPanel";
 import type { EmployeeProfile } from "../types";
 
 // ---- 個人資料（規格 §七 Employee 導覽：個人資料）----
@@ -82,54 +83,5 @@ export function MyProfilePage() {
 
       <ChangePasswordPanel />
     </section>
-  );
-}
-
-function ChangePasswordPanel() {
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  async function submit(event: Event) {
-    event.preventDefault();
-    setError("");
-    setMessage("");
-    if (newPassword !== confirmPassword) {
-      setError("兩次輸入的新密碼不一致。");
-      return;
-    }
-    setSaving(true);
-    try {
-      await api("/api/auth/change-password", {
-        method: "POST",
-        ...jsonBody({ currentPassword, newPassword }),
-      });
-      setMessage("密碼已變更，下次登入請使用新密碼。");
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "密碼變更失敗。");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <form class="panel section-title" onSubmit={submit}>
-      <div class="panel-heading"><h2>變更密碼</h2></div>
-      <Message text={message} />
-      <Message text={error} error />
-      <div class="form-grid">
-        <label class="full">目前密碼<input type="password" value={currentPassword} onInput={(event) => setCurrentPassword(event.currentTarget.value)} required /></label>
-        <label>新密碼<input type="password" value={newPassword} onInput={(event) => setNewPassword(event.currentTarget.value)} required /></label>
-        <label>再次輸入新密碼<input type="password" value={confirmPassword} onInput={(event) => setConfirmPassword(event.currentTarget.value)} required /></label>
-      </div>
-      <small>至少 10 碼，包含大小寫英文字母、數字與符號。</small>
-      <div class="button-row"><button class="primary" disabled={saving}>{saving ? "更新中…" : "更新密碼"}</button></div>
-    </form>
   );
 }

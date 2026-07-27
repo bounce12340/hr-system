@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, ApiClientError, jsonBody } from "../api";
+import { ChangePasswordPanel } from "../components/ChangePasswordPanel";
 import type { JobType, SettingItem } from "../types";
 
 // ---- 系統設定（規格 §七 Admin 導覽：系統設定）----
@@ -32,6 +33,12 @@ export function SystemSettingsPage() {
           <p>維護提醒天數等系統參數，以及職務類型的必修級距映射。</p>
         </div>
       </div>
+      {/*
+        我的帳號放在系統設定頁而非另開分頁：admin 首次登入設定密碼後，介面上原本
+        沒有任何再次變更的入口（API 一直是通的，缺的只是入口）。此處與員工的
+        「個人資料」頁共用同一個元件。
+      */}
+      <ChangePasswordPanel />
       <GeneralSettingsPanel />
       <JobTypesPanel />
     </section>
