@@ -14,6 +14,7 @@ import { ReportsPage } from "./M4AdminPages";
 import { TalentManagementPage } from "./M5AdminPages";
 import { EmployeeManagementPage } from "./EmployeeAdminPages";
 import { AttendanceManagementPage } from "./AttendanceAdminPages";
+import { SystemSettingsPage } from "./SettingsAdminPages";
 import type {
   AssignmentEmployee,
   CompletionEmployee,
@@ -39,7 +40,8 @@ type AdminTab =
   | "special-days"
   | "attendance-management"
   | "reports"
-  | "talent";
+  | "talent"
+  | "settings";
 
 const LEVEL_LABEL = ["", "低", "中", "高"];
 const todayMonth = () => new Date().toISOString().slice(0, 7);
@@ -80,6 +82,7 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
     { id: "attendance-management", label: "出缺勤管理" },
     { id: "reports", label: "報表" },
     { id: "talent", label: "人才盤點" },
+    { id: "settings", label: "系統設定" },
   ];
   return (
     <div class="app-shell">
@@ -99,11 +102,18 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
         </div>
       </aside>
       <main class="workspace">
+        {/*
+          行動版（900px 以下）側邊欄整個 display:none，而登出按鈕原本只存在於
+          側邊欄內，導致手機上沒有任何登出途徑。此處補上，維持與側邊欄一致的出口。
+        */}
         <header class="mobile-header">
           <strong>HR Learning</strong>
-          <select value={tab} onChange={(event) => setTab(event.currentTarget.value as AdminTab)}>
-            {tabs.map((item) => <option value={item.id}>{item.label}</option>)}
-          </select>
+          <div class="mobile-header-actions">
+            <select value={tab} onChange={(event) => setTab(event.currentTarget.value as AdminTab)}>
+              {tabs.map((item) => <option value={item.id}>{item.label}</option>)}
+            </select>
+            <button class="text-button" onClick={onLogout}>登出</button>
+          </div>
         </header>
         {tab === "dashboard" && <AdminDashboard />}
         {tab === "employees" && <EmployeeManagementPage />}
@@ -121,6 +131,7 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
         {tab === "attendance-management" && <AttendanceManagementPage />}
         {tab === "reports" && <ReportsPage />}
         {tab === "talent" && <TalentManagementPage />}
+        {tab === "settings" && <SystemSettingsPage />}
       </main>
     </div>
   );

@@ -171,6 +171,45 @@ export interface JobTypeOption {
   requiredLevel: number;
 }
 
+// ---- 系統設定／職務類型管理（規格 §七 Admin「系統設定」）----
+// 對應後端 GET/PATCH /api/admin/settings 與 /api/admin/job-types（見 src/server）。
+
+export type SettingValueType = "string" | "number" | "boolean" | "json";
+
+export interface SettingItem {
+  key: string;
+  value: string;
+  valueType: SettingValueType;
+  description: string;
+}
+
+export interface JobType {
+  id: string;
+  name: string;
+  requiredLevel: number;
+  active: number;
+  employeeCount?: number;
+}
+
+// ---- 員工「個人資料」頁（規格 §七 Employee 導覽）----
+// 對應後端 GET/PATCH /api/employee/profile（見 src/server/m1.ts 的
+// EmployeeProfileRecord）。回傳鍵為 `employee`。唯讀欄位（員工編號、部門、
+// 職等、職稱、職務類型、到職日等）由 HR 於員工管理維護，此頁僅能改姓名與 email。
+export interface EmployeeProfile {
+  id: string;
+  employeeNo: string;
+  name: string;
+  email: string;
+  department: string;
+  grade: string;
+  title: string;
+  jobTypeId: string;
+  jobType: string;
+  hireDate: string;
+  terminationDate: string | null;
+  status: "active" | "inactive";
+}
+
 export interface AttendanceRecord {
   id: string;
   employeeId: string;

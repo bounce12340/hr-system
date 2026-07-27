@@ -1083,6 +1083,168 @@ async function updateEmployee(context: ApiContext, id: string): Promise<Response
   return json({ employee: await getEmployeeRecord(context.env.DB, id) });
 }
 
+// ---------------------------------------------------------------------------
+// 職務類型管理（規格 §四 4.1／§七 系統設定：職務類型與必修級距映射做成資料表，不寫死）
+// ---------------------------------------------------------------------------
+
+interface JobTypeInput {
+  name?: unknown;
+  requiredLevel?: unknown;
+  active?: unknown;
+}
+
+interface JobTypeRecord {
+  id: string;
+  name: string;
+  requiredLevel: number;
+  active: number;
+  employeeCount: number;
+}
+
+function parseJobType(body: JobTypeInput): { name: string; requiredLevel: number; active: number } {
+  return {
+    name: requiredString(body.name, "職務類型名稱", 100),
+    requiredLevel: integer(body.requiredLevel, "必修級距", 1, 3),
+    active: booleanFlag(body.active, true),
+  };
+}
+
+async function assertJobTypeNameAvailable(db: D1Database, name: string, excludeId?: string): Promise<void> {
+  const existing = excludeId
+    ? await db.prepare("SELECT id FROM job_types WHERE name = ? AND id <> ?")
+      .bind(name, excludeId).first<{ id: string }>()
+    : await db.prepare("SELECT id FROM job_types WHERE name = ?")
+      .bind(name).first<{ id: string }>();
+  if (existing) throw new ApiError(409, `職務類型「${name}」已存在。`);
+}
+
+async function getJobTypeRecord(db: D1Database, id: string): Promise<JobTypeRecord> {
+  const row = await db.prepare(`
+    SELECT jt.id, jt.name, jt.required_level AS requiredLevel, jt.active,
+           (SELECT COUNT(*) FROM employees e WHERE e.job_type_id = jt.id) AS employeeCount
+    FROM job_types jt WHERE jt.id = ?
+  `).bind(id).first<JobTypeRecord>();
+  if (!row) throw new ApiError(404, "找不到指定職務類型。");
+  return row;
+}
+
+/**
+ * required_level 是排課指派（見 :202 activeEmployees／:214 recommendedEmployeeIds）用來比對
+ * 課程 competencyLevel 的必修級距依據。改動只影響「之後」計算的應上名單；已建立場次時寫入
+ * enrollments 的名單不會回溯重算，需要的話得由 admin 手動調整既有場次的名單。
+ */
+async function listJobTypes(context: ApiContext): Promise<Response> {
+  const result = await context.env.DB.prepare(`
+    SELECT jt.id, jt.name, jt.required_level AS requiredLevel, jt.active,
+           (SELECT COUNT(*) FROM employees e WHERE e.job_type_id = jt.id) AS employeeCount
+    FROM job_types jt
+    ORDER BY jt.required_level, jt.name
+  `).all<JobTypeRecord>();
+  return json({ jobTypes: result.results });
+}
+
+async function createJobType(context: ApiContext): Promise<Response> {
+  const fields = parseJobType(await parseJson<JobTypeInput>(context.request));
+  await assertJobTypeNameAvailable(context.env.DB, fields.name);
+  const id = uuid();
+  await context.env.DB.prepare(`
+    INSERT INTO job_types (id, name, required_level, active) VALUES (?, ?, ?, ?)
+  `).bind(id, fields.name, fields.requiredLevel, fields.active).run();
+  return json({ jobType: await getJobTypeRecord(context.env.DB, id) }, 201);
+}
+
+async function updateJobType(context: ApiContext, id: string): Promise<Response> {
+  const fields = parseJobType(await parseJson<JobTypeInput>(context.request));
+  await assertJobTypeNameAvailable(context.env.DB, fields.name, id);
+  const result = await context.env.DB.prepare(`
+    UPDATE job_types SET name = ?, required_level = ?, active = ?,
+      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE id = ?
+  `).bind(fields.name, fields.requiredLevel, fields.active, id).run();
+  if (result.meta.changes === 0) throw new ApiError(404, "找不到指定職務類型。");
+  return json({ jobType: await getJobTypeRecord(context.env.DB, id) });
+}
+
+/** 已有員工掛在此職務類型時禁止刪除，避免員工主檔失去有效的 job_type_id 參照。 */
+async function deleteJobType(context: ApiContext, id: string): Promise<Response> {
+  const usage = await context.env.DB.prepare(
+    "SELECT COUNT(*) AS count FROM employees WHERE job_type_id = ?",
+  ).bind(id).first<{ count: number }>();
+  if ((usage?.count ?? 0) > 0) {
+    throw new ApiError(409, `此職務類型目前有 ${usage?.count} 位員工使用中，請先變更這些員工的職務類型後再刪除。`);
+  }
+  const result = await context.env.DB.prepare("DELETE FROM job_types WHERE id = ?").bind(id).run();
+  if (result.meta.changes === 0) throw new ApiError(404, "找不到指定職務類型。");
+  return json({ id, deleted: true });
+}
+
+// ---------------------------------------------------------------------------
+// 員工個人資料（規格 §三：員工可改個人基本資料）
+// ---------------------------------------------------------------------------
+
+interface EmployeeProfileInput {
+  name?: unknown;
+  email?: unknown;
+}
+
+interface EmployeeProfileRecord {
+  id: string;
+  employeeNo: string;
+  name: string;
+  email: string;
+  department: string;
+  grade: string;
+  title: string;
+  jobTypeId: string;
+  jobType: string;
+  hireDate: string;
+  terminationDate: string | null;
+  status: "active" | "inactive";
+}
+
+/** 刻意不 SELECT salary（規格 §三：薪資為敏感資料，僅 admin 可見，見 /api/admin/employees）。 */
+async function getEmployeeProfile(db: D1Database, id: string): Promise<EmployeeProfileRecord> {
+  const row = await db.prepare(`
+    SELECT e.id, e.employee_no AS employeeNo, e.name, e.email, e.department, e.grade, e.title,
+           e.job_type_id AS jobTypeId, jt.name AS jobType, e.hire_date AS hireDate,
+           e.termination_date AS terminationDate, e.status
+    FROM employees e JOIN job_types jt ON jt.id = e.job_type_id
+    WHERE e.id = ?
+  `).bind(id).first<EmployeeProfileRecord>();
+  if (!row) throw new ApiError(404, "找不到員工資料。");
+  return row;
+}
+
+async function employeeProfile(
+  context: ApiContext,
+  user: AuthUser & { employeeId: string },
+): Promise<Response> {
+  return json({ employee: await getEmployeeProfile(context.env.DB, user.employeeId) });
+}
+
+/**
+ * 可寫欄位白名單僅 name／email（employees.email 聯絡信箱，與 users.email 登入帳號分離，
+ * 改這裡不影響登入身分）。UPDATE 語句寫死只列 name／email 兩欄，不論請求 body 夾帶什麼其他
+ * 欄位（department／grade／title／jobTypeId／salary／status／hireDate／terminationDate／
+ * employeeNo）都不會被寫入——防護做在 SQL 層，而非「先驗證再擋」的邏輯層。
+ */
+async function updateEmployeeProfile(
+  context: ApiContext,
+  user: AuthUser & { employeeId: string },
+): Promise<Response> {
+  const body = await parseJson<EmployeeProfileInput>(context.request);
+  const name = requiredString(body.name, "姓名", 100);
+  const email = requiredString(body.email, "Email", 200);
+  if (!EMAIL_PATTERN.test(email)) throw new ApiError(422, "Email 格式不正確。");
+  await assertEmailAvailable(context.env.DB, email, user.employeeId);
+  const result = await context.env.DB.prepare(`
+    UPDATE employees SET name = ?, email = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE id = ?
+  `).bind(name, email, user.employeeId).run();
+  if (result.meta.changes === 0) throw new ApiError(404, "找不到員工資料。");
+  return json({ employee: await getEmployeeProfile(context.env.DB, user.employeeId) });
+}
+
 interface ImportError {
   row: number;
   message: string;
@@ -1384,6 +1546,13 @@ export async function handleAdminM1(context: ApiContext, path: string): Promise<
   }
   const employeeMatch = path.match(/^\/api\/admin\/employees\/([^/]+)$/);
   if (employeeMatch?.[1] && context.request.method === "PATCH") return updateEmployee(context, employeeMatch[1]);
+
+  if (path === "/api/admin/job-types" && context.request.method === "GET") return listJobTypes(context);
+  if (path === "/api/admin/job-types" && context.request.method === "POST") return createJobType(context);
+  const jobTypeMatch = path.match(/^\/api\/admin\/job-types\/([^/]+)$/);
+  if (jobTypeMatch?.[1] && context.request.method === "PATCH") return updateJobType(context, jobTypeMatch[1]);
+  if (jobTypeMatch?.[1] && context.request.method === "DELETE") return deleteJobType(context, jobTypeMatch[1]);
+
   if (path === "/api/admin/certifications/options" && context.request.method === "GET") {
     return certificationOptions(context);
   }
@@ -1442,6 +1611,12 @@ export async function handleEmployeeM1(context: ApiContext, path: string): Promi
   }
   if (path === "/api/employee/training-records" && context.request.method === "GET") {
     return employeeTrainingRecords(context, user);
+  }
+  if (path === "/api/employee/profile" && context.request.method === "GET") {
+    return employeeProfile(context, user);
+  }
+  if (path === "/api/employee/profile" && context.request.method === "PATCH") {
+    return updateEmployeeProfile(context, user);
   }
   return null;
 }

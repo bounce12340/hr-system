@@ -3,8 +3,9 @@ import { api, jsonBody } from "../api";
 import { MonthCalendar } from "../components/Calendar";
 import type { CourseSession, User } from "../types";
 import { EmployeeHome, MyCertifications } from "./M2EmployeePages";
+import { MyProfilePage } from "./EmployeeProfilePages";
 
-type EmployeeTab = "home" | "schedule" | "enroll" | "records" | "certifications" | "idp";
+type EmployeeTab = "home" | "schedule" | "enroll" | "records" | "certifications" | "idp" | "profile";
 const todayMonth = () => new Date().toISOString().slice(0, 7);
 function shiftMonth(month: string, delta: number) { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() + delta); return date.toISOString().slice(0, 7); }
 
@@ -12,7 +13,7 @@ interface EmployeeAppProps { user: User; onLogout: () => void }
 
 export function EmployeeApp({ user, onLogout }: EmployeeAppProps) {
   const [tab, setTab] = useState<EmployeeTab>("home");
-  const tabs: Array<{ id: EmployeeTab; label: string }> = [{ id: "home", label: "首頁" }, { id: "schedule", label: "我的課表" }, { id: "enroll", label: "課程報名" }, { id: "records", label: "我的訓練紀錄" }, { id: "certifications", label: "我的證照" }, { id: "idp", label: "我的 IDP" }];
+  const tabs: Array<{ id: EmployeeTab; label: string }> = [{ id: "home", label: "首頁" }, { id: "schedule", label: "我的課表" }, { id: "enroll", label: "課程報名" }, { id: "records", label: "我的訓練紀錄" }, { id: "certifications", label: "我的證照" }, { id: "idp", label: "我的 IDP" }, { id: "profile", label: "個人資料" }];
   return <div class="employee-shell">
     <header class="employee-header"><div class="sidebar-brand"><span>UI</span><strong>HR Learning</strong></div><nav>{tabs.map((item) => <button class={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav><div><strong>{user.employeeName}</strong><small>{user.department}</small><button class="text-button" onClick={onLogout}>登出</button></div></header>
     <main class="employee-workspace">
@@ -22,6 +23,7 @@ export function EmployeeApp({ user, onLogout }: EmployeeAppProps) {
       {tab === "records" && <MyRecords />}
       {tab === "certifications" && <MyCertifications />}
       {tab === "idp" && <MyIdp />}
+      {tab === "profile" && <MyProfilePage />}
     </main>
   </div>;
 }
