@@ -200,9 +200,12 @@ describe("M1 出席、完訓與員工端", () => {
       records: [{ employeeId: "emp-002", status: "completed" }],
     }));
     expect(attendance.response.status).toBe(200);
+    // 以 course_session_id 鎖定這次新建的場次，而非 employee_id + course_id：
+    // 0009 的歷史種子資料本來就會讓 emp-002 對 course-04 累積不只一筆完訓紀錄，
+    // 這裡只驗證「這次登錄出席」確實新增了一筆屬於這個場次的紀錄。
     const records = await env.DB.prepare(
-      "SELECT COUNT(*) AS count FROM training_records WHERE employee_id = 'emp-002' AND course_id = 'course-04'",
-    ).first<{ count: number }>();
+      "SELECT COUNT(*) AS count FROM training_records WHERE course_session_id = ?",
+    ).bind(session.body.data?.id).first<{ count: number }>();
     expect(records?.count).toBe(1);
 
     const completion = await call<{

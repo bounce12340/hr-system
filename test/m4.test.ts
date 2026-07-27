@@ -217,9 +217,15 @@ describe("M4 報表指標", () => {
     const before = await fetchReport<Completion>("training-completion", period(5, 0));
     expect(before.data.company.employees).toBe(12);
     expect(before.data.company.requiredTotal).toBe(60);
-    expect(before.data.company.completedTotal).toBe(0);
+    // 43 來自 0009 種子的歷史完訓紀錄（人資行政部 11、診所事業部 16、醫院事業部 16）。
+    expect(before.data.company.completedTotal).toBe(43);
     expect(before.data.byDepartment).toHaveLength(3);
 
+    // 用 emp-014 而非 emp-002：0009 的歷史種子資料已讓 emp-002 完成全部 5 門
+    // 必修課，若沿用 emp-002 會因 completionData 以 (employee_id, course_id)
+    // 去重，「再完成一次 course-04」不會讓 completedTotal 變化，測不出「即時
+    // 反映」的行為。emp-014 在種子中缺席了 course-04（見 0009 §1-5），仍有
+    // 空間可以完成。
     const session = await call<{ id: string }>("/api/admin/course-sessions", adminJson("POST", {
       courseId: "course-04",
       sessionDate: `${monthOffset(2)}-10`,
@@ -228,24 +234,25 @@ describe("M4 報表指標", () => {
       location: "A 教室",
       capacity: 5,
       notes: "",
-      selectedEmployeeIds: ["emp-002"],
+      selectedEmployeeIds: ["emp-014"],
     }));
     expect(session.response.status).toBe(201);
     const attendance = await call(
       `/api/admin/course-sessions/${session.body.data?.id}/attendance`,
-      adminJson("PUT", { records: [{ employeeId: "emp-002", status: "completed" }] }),
+      adminJson("PUT", { records: [{ employeeId: "emp-014", status: "completed" }] }),
     );
     expect(attendance.response.status).toBe(200);
 
     const after = await fetchReport<Completion>("training-completion", period(5, 0));
-    expect(after.data.company.completedTotal).toBe(1);
-    expect(after.data.company.completionRate).toBe(1.67);
+    expect(after.data.company.completedTotal).toBe(44);
+    expect(after.data.company.completionRate).toBe(73.33);
     const clinic = after.data.byDepartment.find((item) => item.department === "診所事業部");
-    expect(clinic?.completedTotal).toBe(1);
+    expect(clinic?.completedTotal).toBe(17);
 
-    // 期末落在完訓之前時，以「截至期末」口徑不應計入。
+    // 期末落在完訓之前時，以「截至期末」口徑不應計入這次新完成的紀錄；
+    // 但 0009 種子中更早（-5～-3 個月）完成的歷史紀錄仍應計入。
     const asOfPast = await fetchReport<Completion>("training-completion", period(5, 3));
-    expect(asOfPast.data.company.completedTotal).toBe(0);
+    expect(asOfPast.data.company.completedTotal).toBe(40);
   });
 
   it("薪資成本只加總期末在職者的薪資", async () => {

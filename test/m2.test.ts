@@ -285,6 +285,15 @@ describe("M2 證照、提醒與訓練矩陣", () => {
   });
 
   it("職務類型 × 必修課矩陣計算百分比並套用紅黃綠門檻", async () => {
+    // 0009 的歷史種子資料已讓內勤（jt-office）4 人對 course-01／02／03 累積了
+    // 完訓紀錄，若不清除會與這裡刻意建構的 75%／100%／0% 情境互相污染。
+    // 本測試驗證的是矩陣計算邏輯本身，不依賴種子資料現況，故先清空這 4 人
+    // 在這三門課上的既有紀錄，再灌入本測試要控制的固定情境。
+    await env.DB.prepare(`
+      DELETE FROM training_records
+      WHERE course_id IN ('course-01', 'course-02', 'course-03')
+        AND employee_id IN ('emp-001', 'emp-004', 'emp-007', 'emp-010')
+    `).run();
     const records = [
       ["matrix-yellow-1", "emp-001", "course-01", "cs-01", "enr-cs01-emp-001"],
       ["matrix-yellow-2", "emp-004", "course-01", "cs-01", "enr-cs01-emp-004"],
