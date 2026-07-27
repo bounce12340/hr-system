@@ -251,9 +251,10 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
 .home-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 1rem; align-items: start; }
 .certification-card small { margin-top: .8rem; }
 
-.recruitment-nav { display: flex; gap: .35rem; overflow-x: auto; margin: -1rem 0 1.3rem; padding: .35rem; border: 1px solid var(--line); border-radius: 12px; background: #e9eeea; }
-.recruitment-nav button { flex: 0 0 auto; border: 0; border-radius: 8px; padding: .65rem .85rem; background: transparent; color: var(--muted); font-weight: 700; }
-.recruitment-nav button.active { background: white; color: var(--green); box-shadow: 0 3px 12px rgba(24, 57, 51, .09); }
+.recruitment-nav, .talent-nav { display: flex; gap: .35rem; overflow-x: auto; margin: -1rem 0 1.3rem; padding: .35rem; border: 1px solid var(--line); border-radius: 12px; background: #e9eeea; }
+.recruitment-nav button, .talent-nav button { flex: 0 0 auto; border: 0; border-radius: 8px; padding: .65rem .85rem; background: transparent; color: var(--muted); font-weight: 700; }
+.recruitment-nav button.active, .talent-nav button.active { background: white; color: var(--green); box-shadow: 0 3px 12px rgba(24, 57, 51, .09); }
+.panel.selected { border-color: var(--green-2); box-shadow: 0 0 0 2px rgba(29,103,93,.12); }
 .funnel-grid { display: grid; grid-template-columns: repeat(7, minmax(116px, 1fr)); gap: .55rem; overflow-x: auto; padding-bottom: .3rem; }
 .funnel-card { position: relative; min-width: 116px; padding: .85rem; border: 1px solid var(--line); border-radius: 12px; background: white; }
 .funnel-card > span { display: grid; place-items: center; width: 23px; height: 23px; border-radius: 50%; background: var(--mint); color: var(--green); font-size: .7rem; font-weight: 700; }
@@ -305,6 +306,23 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
 .chart-block { min-width: 0; }
 .chart-block h3 { font-size: .8rem; font-weight: 700; color: var(--muted); margin-bottom: .6rem; }
 
+.nine-grid-scroll { overflow-x: auto; border-radius: 12px; }
+.nine-grid { display: grid; grid-template-columns: 110px repeat(3, minmax(120px, 1fr)); gap: .5rem; min-width: 560px; }
+.nine-grid-corner { display: grid; place-items: center; padding: .4rem; font-size: .7rem; color: var(--muted); font-weight: 700; text-align: center; }
+.nine-grid-header { display: grid; place-items: center; padding: .6rem; background: #e9eeea; border-radius: 8px; font-weight: 700; font-size: .82rem; text-align: center; }
+.nine-grid-cell { min-height: 84px; padding: .5rem; background: white; border: 1px solid var(--line); border-radius: 10px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: .35rem; }
+.nine-grid-chip { border: 0; border-radius: 999px; padding: .3rem .6rem; background: var(--mint); color: var(--green); font-size: .76rem; font-weight: 700; }
+.nine-grid-chip:hover { background: #c5e6db; }
+.nine-grid-empty { color: #c3cac6; font-size: .8rem; margin: auto; }
+
+.successor-row { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; padding: .65rem; border-radius: 8px; background: #f4f7f4; }
+.successor-row > div:first-child { display: grid; flex: 1; min-width: 130px; }
+.successor-row select { width: auto; min-width: 150px; }
+.successor-notes { flex: 1; min-width: 120px; color: var(--muted); font-size: .8rem; }
+
+.idp-item-fields { display: grid; grid-template-columns: minmax(160px, 1.4fr) 130px 130px minmax(140px, 1fr); gap: .5rem; }
+.idp-item-fields-employee { display: grid; grid-template-columns: 130px minmax(140px, 1fr) auto; gap: .5rem; align-items: center; }
+
 @media (max-width: 900px) {
   .app-shell { display: block; }
   .sidebar { display: none; }
@@ -346,7 +364,11 @@ td small { display: block; max-width: 280px; white-space: nowrap; overflow: hidd
   .score-row em { grid-column: 1 / -1; }
   .reminder-card { grid-template-columns: auto 1fr; }
   .reminder-card > span { grid-column: 2; justify-self: start; }
-  .recruitment-nav { margin-top: -.5rem; }
+  .recruitment-nav, .talent-nav { margin-top: -.5rem; }
+  .nine-grid { min-width: 480px; grid-template-columns: 84px repeat(3, minmax(96px, 1fr)); }
+  .nine-grid-cell { min-height: 64px; padding: .35rem; }
+  .idp-item-fields, .idp-item-fields-employee { grid-template-columns: 1fr; }
+  .successor-row select { width: 100%; }
   .interview-score-row { grid-template-columns: 1fr 88px; }
   .interview-score-row input:nth-of-type(2) { grid-column: 1 / -1; }
   .probation-facts { grid-template-columns: repeat(2, 1fr); }

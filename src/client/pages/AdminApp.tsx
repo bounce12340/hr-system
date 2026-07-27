@@ -11,6 +11,7 @@ import {
 } from "./M2AdminPages";
 import { RecruitmentPage } from "./M3AdminPages";
 import { ReportsPage } from "./M4AdminPages";
+import { TalentManagementPage } from "./M5AdminPages";
 import { EmployeeManagementPage } from "./EmployeeAdminPages";
 import { AttendanceManagementPage } from "./AttendanceAdminPages";
 import type {
@@ -37,7 +38,8 @@ type AdminTab =
   | "recruitment"
   | "special-days"
   | "attendance-management"
-  | "reports";
+  | "reports"
+  | "talent";
 
 const LEVEL_LABEL = ["", "低", "中", "高"];
 const todayMonth = () => new Date().toISOString().slice(0, 7);
@@ -77,6 +79,7 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
     { id: "special-days", label: "重要日子" },
     { id: "attendance-management", label: "出缺勤管理" },
     { id: "reports", label: "報表" },
+    { id: "talent", label: "人才盤點" },
   ];
   return (
     <div class="app-shell">
@@ -117,6 +120,7 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
         {tab === "special-days" && <SpecialDaysPage />}
         {tab === "attendance-management" && <AttendanceManagementPage />}
         {tab === "reports" && <ReportsPage />}
+        {tab === "talent" && <TalentManagementPage />}
       </main>
     </div>
   );

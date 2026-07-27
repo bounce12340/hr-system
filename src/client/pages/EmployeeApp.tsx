@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { api } from "../api";
+import { api, jsonBody } from "../api";
 import { MonthCalendar } from "../components/Calendar";
 import type { CourseSession, User } from "../types";
 import { EmployeeHome, MyCertifications } from "./M2EmployeePages";
 
-type EmployeeTab = "home" | "schedule" | "enroll" | "records" | "certifications";
+type EmployeeTab = "home" | "schedule" | "enroll" | "records" | "certifications" | "idp";
 const todayMonth = () => new Date().toISOString().slice(0, 7);
 function shiftMonth(month: string, delta: number) { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() + delta); return date.toISOString().slice(0, 7); }
 
@@ -12,7 +12,7 @@ interface EmployeeAppProps { user: User; onLogout: () => void }
 
 export function EmployeeApp({ user, onLogout }: EmployeeAppProps) {
   const [tab, setTab] = useState<EmployeeTab>("home");
-  const tabs: Array<{ id: EmployeeTab; label: string }> = [{ id: "home", label: "首頁" }, { id: "schedule", label: "我的課表" }, { id: "enroll", label: "課程報名" }, { id: "records", label: "我的訓練紀錄" }, { id: "certifications", label: "我的證照" }];
+  const tabs: Array<{ id: EmployeeTab; label: string }> = [{ id: "home", label: "首頁" }, { id: "schedule", label: "我的課表" }, { id: "enroll", label: "課程報名" }, { id: "records", label: "我的訓練紀錄" }, { id: "certifications", label: "我的證照" }, { id: "idp", label: "我的 IDP" }];
   return <div class="employee-shell">
     <header class="employee-header"><div class="sidebar-brand"><span>UI</span><strong>HR Learning</strong></div><nav>{tabs.map((item) => <button class={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav><div><strong>{user.employeeName}</strong><small>{user.department}</small><button class="text-button" onClick={onLogout}>登出</button></div></header>
     <main class="employee-workspace">
@@ -21,6 +21,7 @@ export function EmployeeApp({ user, onLogout }: EmployeeAppProps) {
       {tab === "enroll" && <CourseEnrollment />}
       {tab === "records" && <MyRecords />}
       {tab === "certifications" && <MyCertifications />}
+      {tab === "idp" && <MyIdp />}
     </main>
   </div>;
 }
@@ -63,5 +64,83 @@ function MyRecords() {
     <div class="metric-row"><div class="metric accent"><span>必修完成率</span><strong>{completion?.completionRate ?? 0}%</strong></div><div class="metric"><span>完成課程</span><strong>{records.length}</strong></div><div class="metric"><span>累積時數</span><strong>{hours}h</strong></div></div>
     <div class="panel"><h2>尚未完成</h2><div class="chip-list">{completion?.missingCourses.map((course) => <span>{["", "低", "中", "高"][course.competencyLevel]}・{course.name}</span>)}{completion?.missingCourses.length === 0 && <span class="done-chip">所有必修均已完成</span>}</div></div>
     <div class="table-card"><table><thead><tr><th>課程</th><th>完成日</th><th>時數</th><th>有效至</th></tr></thead><tbody>{records.map((record) => <tr><td><span class={`level-badge level-${record.competencyLevel}`}>{["", "低", "中", "高"][record.competencyLevel]}</span> <strong>{record.courseName}</strong></td><td>{record.sessionDate}</td><td>{record.hours}h</td><td>{record.validUntil ?? "永久"}</td></tr>)}</tbody></table>{records.length === 0 && <div class="empty-state">尚無完訓紀錄。</div>}</div>
+  </section>;
+}
+
+// ---- M5：我的 IDP（對應 src/server/m5.ts，base /api/employee/idp）----
+// 員工僅能查看與更新自己的 IDP 計畫；狀態／備註以外欄位由 admin 管理。
+interface MyIdpItem { id: string; idpPlanId: string; action: string; dueDate: string; status: string; employeeNotes: string }
+interface MyIdpPlan { id: string; title: string; goal: string; startDate: string; dueDate: string; status: string; items: MyIdpItem[] }
+const IDP_PLAN_STATUS_LABEL: Record<string, string> = { draft: "草稿", active: "進行中", completed: "已完成", cancelled: "已取消" };
+const IDP_ITEM_STATUS_LABEL: Record<string, string> = { pending: "待處理", in_progress: "進行中", completed: "已完成" };
+
+function MyIdp() {
+  const [plans, setPlans] = useState<MyIdpPlan[]>([]);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  async function load() {
+    try {
+      const data = await api<{ idpPlans: MyIdpPlan[] }>("/api/employee/idp");
+      setPlans(data.idpPlans.map((plan) => ({ ...plan, items: plan.items ?? [] })));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "無法讀取 IDP 計畫。");
+    }
+  }
+  useEffect(() => { void load(); }, []);
+
+  function updateItemLocal(planId: string, itemId: string, patch: Partial<MyIdpItem>) {
+    setPlans((current) => current.map((plan) => plan.id === planId
+      ? { ...plan, items: plan.items.map((item) => item.id === itemId ? { ...item, ...patch } : item) }
+      : plan));
+  }
+
+  async function saveItem(item: MyIdpItem) {
+    setError(""); setMessage("");
+    try {
+      await api(`/api/employee/idp/items/${item.id}`, {
+        method: "PATCH",
+        ...jsonBody({ status: item.status, employeeNotes: item.employeeNotes }),
+      });
+      setMessage("行動項目已更新。");
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "無法更新行動項目。");
+    }
+  }
+
+  return <section>
+    <div class="page-heading"><div><p class="eyebrow">MY DEVELOPMENT</p><h1>我的 IDP</h1><p>查看個人發展計畫，更新行動項目進度與備註。</p></div></div>
+    {message && <div class="alert success">{message}</div>}{error && <div class="alert error">{error}</div>}
+    <div class="card-list">
+      {plans.map((plan) => (
+        <article class="panel" key={plan.id}>
+          <div class="panel-heading">
+            <div>
+              <span class={`status ${plan.status === "completed" ? "ok" : plan.status === "cancelled" ? "danger" : "warning"}`}>{IDP_PLAN_STATUS_LABEL[plan.status] ?? plan.status}</span>
+              <h2>{plan.title}</h2>
+              <small>{plan.startDate} ～ {plan.dueDate}</small>
+            </div>
+          </div>
+          <p>{plan.goal}</p>
+          <div class="checklist-list">
+            {plan.items.map((item) => (
+              <div class="checklist-row" key={item.id}>
+                <div><strong>{item.action}</strong><small>期限：{item.dueDate}</small></div>
+                <div class="idp-item-fields idp-item-fields-employee">
+                  <select value={item.status} onChange={(event) => updateItemLocal(plan.id, item.id, { status: event.currentTarget.value })}>
+                    {Object.entries(IDP_ITEM_STATUS_LABEL).map(([value, label]) => <option value={value}>{label}</option>)}
+                  </select>
+                  <input value={item.employeeNotes} onInput={(event) => updateItemLocal(plan.id, item.id, { employeeNotes: event.currentTarget.value })} placeholder="我的備註" />
+                  <button class="secondary" onClick={() => void saveItem(item)}>儲存</button>
+                </div>
+              </div>
+            ))}
+            {plan.items.length === 0 && <div class="empty-state">此計畫尚無行動項目。</div>}
+          </div>
+        </article>
+      ))}
+      {plans.length === 0 && <div class="empty-state">目前沒有指派給你的 IDP 計畫。</div>}
+    </div>
   </section>;
 }
