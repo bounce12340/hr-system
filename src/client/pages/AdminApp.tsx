@@ -87,7 +87,7 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
   return (
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="sidebar-brand"><span>UI</span><strong>HR Learning</strong></div>
+        <div class="sidebar-brand"><span>HR</span><strong>HR Learning</strong></div>
         <nav>
           {tabs.map((item) => (
             <button class={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)} key={item.id}>
