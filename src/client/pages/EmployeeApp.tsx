@@ -5,8 +5,10 @@ import type { CourseSession, User } from "../types";
 import { EmployeeHome, MyCertifications } from "./M2EmployeePages";
 import { MyHealthChecksPage } from "./M6EmployeePages";
 import { MyProfilePage } from "./EmployeeProfilePages";
+import { EmployeeHelpPage } from "./HelpPages";
+import { GuidedTour, useOnboardingTour, type TourStep } from "../components/GuidedTour";
 
-type EmployeeTab = "home" | "schedule" | "enroll" | "records" | "certifications" | "healthChecks" | "idp" | "profile";
+type EmployeeTab = "home" | "schedule" | "enroll" | "records" | "certifications" | "healthChecks" | "idp" | "profile" | "help";
 const todayMonth = () => new Date().toISOString().slice(0, 7);
 function shiftMonth(month: string, delta: number) { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() + delta); return date.toISOString().slice(0, 7); }
 
@@ -14,9 +16,51 @@ interface EmployeeAppProps { user: User; onLogout: () => void }
 
 export function EmployeeApp({ user, onLogout }: EmployeeAppProps) {
   const [tab, setTab] = useState<EmployeeTab>("home");
-  const tabs: Array<{ id: EmployeeTab; label: string }> = [{ id: "home", label: "首頁" }, { id: "schedule", label: "我的課表" }, { id: "enroll", label: "課程報名" }, { id: "records", label: "我的訓練紀錄" }, { id: "certifications", label: "我的證照" }, { id: "healthChecks", label: "我的健檢" }, { id: "idp", label: "我的 IDP" }, { id: "profile", label: "個人資料" }];
+  const tour = useOnboardingTour(user.tourCompleted);
+  const tabs: Array<{ id: EmployeeTab; label: string }> = [{ id: "home", label: "首頁" }, { id: "schedule", label: "我的課表" }, { id: "enroll", label: "課程報名" }, { id: "records", label: "我的訓練紀錄" }, { id: "certifications", label: "我的證照" }, { id: "healthChecks", label: "我的健檢" }, { id: "idp", label: "我的 IDP" }, { id: "profile", label: "個人資料" }, { id: "help", label: "使用說明" }];
+
+  /*
+   * 員工端只有五步。員工不是天天用這套系統，導覽拉太長反而會被整段略過；
+   * 這裡只涵蓋實際上最常做的三件事（看課表、報名、查完成率）與求助入口。
+   */
+  const tourSteps: TourStep[] = [
+    {
+      title: `${user.employeeName ?? "你好"}，歡迎使用學習平台`,
+      body: <>這裡可以查自己的課表、報名選修課、追蹤必修完成進度，也能看到自己的證照與健檢
+        提醒。只有五步，隨時可以按「略過導覽」。</>,
+    },
+    {
+      target: '[data-tour="nav-schedule"]',
+      title: "我的課表",
+      body: <>人資指派給你的必修課，加上你自己報名的選修課，都在這裡。可以切換月曆或清單檢視。</>,
+      before: () => setTab("schedule"),
+    },
+    {
+      target: '[data-tour="nav-enroll"]',
+      title: "課程報名",
+      body: <>開放報名的選修課在這頁。<strong>名額有限</strong>，額滿就無法報名；若公司設定為
+        需審核，送出後要等人資核准才會出現在課表上。</>,
+      before: () => setTab("enroll"),
+    },
+    {
+      target: '[data-tour="nav-records"]',
+      title: "我的訓練紀錄",
+      body: <>最上方是<strong>必修完成率</strong>，下方「尚未完成」列出你還缺的課。
+        必修清單依你的職務類型自動推導，部分課程有有效期限，過期後會重新變回未完成。</>,
+      before: () => setTab("records"),
+    },
+    {
+      target: '[data-tour="nav-help"]',
+      title: "有問題看這裡",
+      body: <>各分頁的用途、哪些資料可以自己改、忘記密碼怎麼辦，都寫在使用說明裡，
+        也可以從那裡重看本導覽。表單欄位旁的 <strong>?</strong> 則會說明該欄位怎麼填。</>,
+      before: () => setTab("help"),
+    },
+  ];
+
   return <div class="employee-shell">
-    <header class="employee-header"><div class="sidebar-brand"><span>HR</span><strong>HR Learning</strong></div><nav>{tabs.map((item) => <button class={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav><div><strong>{user.employeeName}</strong><small>{user.department}</small><button class="text-button" onClick={onLogout}>登出</button></div></header>
+    <GuidedTour steps={tourSteps} open={tour.open} onClose={() => { tour.close(); setTab("home"); }} />
+    <header class="employee-header"><div class="sidebar-brand"><span>HR</span><strong>HR Learning</strong></div><nav>{tabs.map((item) => <button class={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)} data-tour={`nav-${item.id}`} key={item.id}>{item.label}</button>)}</nav><div><strong>{user.employeeName}</strong><small>{user.department}</small><button class="text-button" onClick={onLogout}>登出</button></div></header>
     <main class="employee-workspace">
       {tab === "home" && <EmployeeHome user={user} />}
       {tab === "schedule" && <MySchedule />}
@@ -26,6 +70,7 @@ export function EmployeeApp({ user, onLogout }: EmployeeAppProps) {
       {tab === "healthChecks" && <MyHealthChecksPage />}
       {tab === "idp" && <MyIdp />}
       {tab === "profile" && <MyProfilePage />}
+      {tab === "help" && <EmployeeHelpPage onReplayTour={tour.replay} />}
     </main>
   </div>;
 }

@@ -8,6 +8,8 @@ export interface User {
   mustChangePassword: boolean;
   employeeName: string | null;
   department: string | null;
+  /** 是否已完成（或略過）新手導覽；false 時登入後會自動開啟導覽。 */
+  tourCompleted: boolean;
 }
 
 export interface Course {
@@ -160,6 +162,8 @@ export interface Employee {
   jobTypeId: string;
   jobType: string;
   hireDate: string;
+  /** 健檢頻率依年齡分級計算，沒有生日就無法分級（見 M6）。 */
+  birthDate: string | null;
   terminationDate: string | null;
   status: EmployeeStatus;
   salary: number | null;

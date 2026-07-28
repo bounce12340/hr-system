@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { api, jsonBody } from "../api";
 import { exportCsv } from "../download";
+import { Field } from "../components/FieldHelp";
 import type { SheetRow } from "../export";
 import type {
   AdminUserAccount,
@@ -139,13 +140,14 @@ interface EmployeeForm {
   title: string;
   jobTypeId: string;
   hireDate: string;
+  birthDate: string;
   salary: string;
 }
 
 function emptyForm(): EmployeeForm {
   return {
     employeeNo: "", name: "", email: "", department: "", grade: "", title: "",
-    jobTypeId: "", hireDate: todayDate(), salary: "",
+    jobTypeId: "", hireDate: todayDate(), birthDate: "", salary: "",
   };
 }
 
@@ -251,6 +253,10 @@ export function EmployeeManagementPage() {
       title: form.title,
       jobTypeId: form.jobTypeId,
       hireDate: form.hireDate,
+      // 一定要送。後端 PATCH 是全量取代，省略等同傳 null——在補上這個欄位之前，
+      // 只要編輯任何一位員工，先前用 CSV 匯入的生日就會被靜默清掉，而畫面上
+      // 完全看不出來，直到健檢頁把那個人標成「缺生日資料」。
+      birthDate: form.birthDate === "" ? null : form.birthDate,
       salary: form.salary === "" ? null : Number(form.salary),
       ...(current ? { status: current.status, terminationDate: current.terminationDate } : {}),
     };
@@ -279,6 +285,7 @@ export function EmployeeManagementPage() {
       title: employee.title,
       jobTypeId: employee.jobTypeId || (jobTypes.find((item) => item.name === employee.jobType)?.id ?? ""),
       hireDate: employee.hireDate,
+      birthDate: employee.birthDate ?? "",
       salary: employee.salary === null || employee.salary === undefined ? "" : String(employee.salary),
     });
     setMessage("");
@@ -572,29 +579,60 @@ export function EmployeeManagementPage() {
       <div class="split-layout">
         <form class="panel sticky-form" onSubmit={save}>
           <h2>{editingId ? "編輯員工" : "新增員工"}</h2>
-          <label>員工編號<input value={form.employeeNo} onInput={(event) => setForm({ ...form, employeeNo: event.currentTarget.value })} required /></label>
+          <Field
+            label="員工編號"
+            help={<>公司內部的唯一識別碼，不可重複。CSV 匯入時也是以它比對既有員工——
+              匯入相同編號會更新該員工，而不是新增一筆。</>}
+          ><input value={form.employeeNo} onInput={(event) => setForm({ ...form, employeeNo: event.currentTarget.value })} required /></Field>
           <label>姓名<input value={form.name} onInput={(event) => setForm({ ...form, name: event.currentTarget.value })} required /></label>
-          <label>Email<input type="email" value={form.email} onInput={(event) => setForm({ ...form, email: event.currentTarget.value })} required /></label>
-          <label>
-            部門
+          <Field
+            label="Email"
+            help={<>公司信箱。這也是他的<strong>登入帳號</strong>，密碼設定連結與各項通知信都會寄到這裡，
+              請確認可正常收信。</>}
+          ><input type="email" value={form.email} onInput={(event) => setForm({ ...form, email: event.currentTarget.value })} required /></Field>
+          <Field
+            label="部門"
+            help={<>可直接輸入新部門名稱，也可從既有清單挑選。部門是完訓追蹤與報表的主要篩選維度，
+              請維持名稱一致（例如統一用「診所事業部」，不要時而簡寫）。</>}
+          >
             <input value={form.department} onInput={(event) => setForm({ ...form, department: event.currentTarget.value })} list="employee-department-options" required />
             <datalist id="employee-department-options">{departmentOptions.map((item) => <option value={item} key={item} />)}</datalist>
-          </label>
-          <label>
-            職等
+          </Field>
+          <Field
+            label="職等"
+            help={<>公司的職級制度（例如 P3、M2）。用於人才盤點與報表分組，
+              <strong>不影響必修課程</strong>——決定必修的是下方的「職務類型」。</>}
+          >
             <input value={form.grade} onInput={(event) => setForm({ ...form, grade: event.currentTarget.value })} list="employee-grade-options" required />
             <datalist id="employee-grade-options">{gradeOptions.map((item) => <option value={item} key={item} />)}</datalist>
-          </label>
+          </Field>
           <label>職稱<input value={form.title} onInput={(event) => setForm({ ...form, title: event.currentTarget.value })} required /></label>
-          <label>
-            職務類型
+          <Field
+            label="職務類型"
+            help={<><strong>這一項決定他要上哪些必修課。</strong>每個職務類型對應一個必修級距，
+              必修是「級距以下全包」的累進式。選錯會讓完訓率與排課應上名單一起錯。
+              選項在「系統設定 → 職務類型」維護。</>}
+          >
             <select value={form.jobTypeId} onChange={(event) => setForm({ ...form, jobTypeId: event.currentTarget.value })} required>
               <option value="">請選擇</option>
               {jobTypes.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
             </select>
-          </label>
-          <label>到職日<input type="date" value={form.hireDate} onInput={(event) => setForm({ ...form, hireDate: event.currentTarget.value })} required /></label>
-          <label>薪資（選填，屬敏感欄位）<input type="number" min="0" value={form.salary} onInput={(event) => setForm({ ...form, salary: event.currentTarget.value })} placeholder="不填則留空" /></label>
+          </Field>
+          <Field
+            label="到職日"
+            help={<>用於試用期提醒。從未健檢的員工，其首次應檢日也以到職日推算。</>}
+          ><input type="date" value={form.hireDate} onInput={(event) => setForm({ ...form, hireDate: event.currentTarget.value })} required /></Field>
+          <Field
+            label="出生日期（選填）"
+            help={<>健檢頻率依《勞工健康保護規則》的年齡分級計算：未滿 40 歲每 5 年、
+              40 歲以上未滿 65 歲每 3 年、65 歲以上每年。<strong>沒有生日就無法分級</strong>，
+              該員工會在健檢頁被標為「缺生日資料」而不會收到應檢提醒。</>}
+          ><input type="date" value={form.birthDate} onInput={(event) => setForm({ ...form, birthDate: event.currentTarget.value })} /></Field>
+          <Field
+            label="薪資（選填，屬敏感欄位）"
+            help={<>僅供報表的薪資成本統計使用。員工端的任何頁面都不會查詢或顯示薪資，
+              管理端也需要另外點開才看得到。不需要就留空。</>}
+          ><input type="number" min="0" value={form.salary} onInput={(event) => setForm({ ...form, salary: event.currentTarget.value })} placeholder="不填則留空" /></Field>
           <div class="button-row">
             <button class="primary">{editingId ? "更新" : "建立"}</button>
             {editingId && <button type="button" class="secondary" onClick={cancelEdit}>取消</button>}

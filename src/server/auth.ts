@@ -15,6 +15,7 @@ interface UserRow {
   password_iterations: number;
   role: "admin" | "employee";
   must_change_password: number;
+  tour_completed_at: string | null;
   employee_name: string | null;
   department: string | null;
 }
@@ -95,13 +96,14 @@ function publicUser(row: UserRow): AuthUser {
     mustChangePassword: row.must_change_password === 1,
     employeeName: row.employee_name,
     department: row.department,
+    tourCompleted: row.tour_completed_at !== null,
   };
 }
 
 async function loadUserByEmail(db: D1Database, email: string): Promise<UserRow | null> {
   return db.prepare(`
     SELECT u.id, u.employee_id, u.email, u.password_hash, u.password_salt,
-           u.password_iterations, u.role, u.must_change_password,
+           u.password_iterations, u.role, u.must_change_password, u.tour_completed_at,
            e.name AS employee_name, e.department
     FROM users u
     LEFT JOIN employees e ON e.id = u.employee_id
@@ -115,7 +117,7 @@ export async function authenticate(request: Request, db: D1Database): Promise<Au
   const tokenHash = await hashToken(token);
   const row = await db.prepare(`
     SELECT u.id, u.employee_id, u.email, u.password_hash, u.password_salt,
-           u.password_iterations, u.role, u.must_change_password,
+           u.password_iterations, u.role, u.must_change_password, u.tour_completed_at,
            e.name AS employee_name, e.department
     FROM sessions s
     JOIN users u ON u.id = s.user_id AND u.active = 1
@@ -268,6 +270,24 @@ export async function changePassword(
   ]);
 
   return { ...user, mustChangePassword: false };
+}
+
+/**
+ * 標記新手導覽已完成（或使用者主動略過）。
+ *
+ * 只寫一次：已完成的帳號重複呼叫不更新時間戳，避免「重看導覽」把原始的首次
+ * 完成時間覆蓋掉——那個時間是日後判斷「導覽改版後誰該重看」的依據。
+ *
+ * 重看導覽不需要呼叫這支：那純粹是前端狀態，本來就已完成的人不該因為重看
+ * 而回到未完成。
+ */
+export async function completeTour(db: D1Database, user: AuthUser): Promise<AuthUser> {
+  await db.prepare(`
+    UPDATE users
+    SET tour_completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE id = ? AND tour_completed_at IS NULL
+  `).bind(user.id).run();
+  return { ...user, tourCompleted: true };
 }
 
 // 帳號的建立／停用／重設密碼／刪除都移到 src/server/accounts.ts，

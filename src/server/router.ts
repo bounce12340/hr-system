@@ -1,5 +1,5 @@
 import { handleAdminAccounts } from "./accounts";
-import { authenticate, changePassword, login, logout } from "./auth";
+import { authenticate, changePassword, completeTour, login, logout } from "./auth";
 import { handleAdminHealthCheck, handleEmployeeHealthCheck } from "./health";
 import {
   ApiError,
@@ -70,6 +70,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     }
     if (path === "/api/auth/change-password" && request.method === "POST") {
       return json({ user: await changePassword(request, env.DB, requireUser(user)) });
+    }
+    if (path === "/api/auth/tour-complete" && request.method === "POST") {
+      // 任何登入者都能呼叫，包含 mustChangePassword 尚未處理的人——導覽與權限
+      // 無關，用 requireUser 而非 requireAdmin／requireEmployeeIdentity。
+      return json({ user: await completeTour(env.DB, requireUser(user)) });
     }
     if (path === "/api/auth/logout" && request.method === "POST") {
       return json({}, 200, { "Set-Cookie": await logout(request, env.DB) });

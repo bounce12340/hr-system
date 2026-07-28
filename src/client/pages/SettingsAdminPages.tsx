@@ -1,6 +1,8 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, ApiClientError, jsonBody } from "../api";
 import { ChangePasswordPanel } from "../components/ChangePasswordPanel";
+import { Field, FieldHelp } from "../components/FieldHelp";
+import type { ComponentChildren } from "preact";
 import type { JobType, SettingItem } from "../types";
 
 // ---- 系統設定（規格 §七 Admin 導覽：系統設定）----
@@ -165,6 +167,29 @@ function MailSettingsPanel() {
   );
 }
 
+/**
+ * 各設定項的說明。
+ *
+ * 資料庫的 description 欄位只夠寫一行標題（畫面上就是那行粗體字），寫不下
+ * 「這個數字影響什麼」「留白會怎樣」。這些才是使用者真正會卡住的地方，因此
+ * 補在前端。鍵沒對到的設定項不顯示問號，不會出錯。
+ */
+const SETTING_HELP: Record<string, ComponentChildren> = {
+  certification_reminder_days: <>證照到期前幾天開始出現在管理儀表板的提醒清單。設太短會來不及安排換證，
+    設太長則提醒會長期佔著版面。</>,
+  health_check_reminder_months: <>健檢應檢日前幾個月開始提醒（限 1～3）。應檢<strong>間隔</strong>本身是依
+    《勞工健康保護規則》的年齡分級自動計算，不在這裡設定。</>,
+  elective_enrollment_requires_approval: <>開啟後，員工報名選修課需 HR 在「排課 → 報名審核」核准才會進課表；
+    關閉則名額內先到先得，直接錄取。</>,
+  password_setup_token_hours: <>密碼設定連結的有效時數（限 1～72）。逾期連結失效，需重新寄送。
+    時間愈短愈安全，但也愈容易讓收信不及時的同仁需要重寄。</>,
+  app_base_url: <>系統對外網址，密碼設定連結會以此組成（例如 <code>https://hr.example.com</code>）。
+    <strong>刻意不從瀏覽器請求自動推導</strong>——那可被偽造，會讓攻擊者誘使系統寄出指向自己網域的
+    「官方」連結。留白時系統不寄信，改回傳連結供管理者自行轉達。</>,
+  custom_domain: <>顯示用的自訂網域名稱。實際的連結網域取自 <code>app_base_url</code>，改這裡不會改變寄出的連結。</>,
+  timezone: <>系統時區，影響日期與提醒的計算基準。台灣請維持 <code>Asia/Taipei</code>。</>,
+};
+
 function GeneralSettingsPanel() {
   const [settings, setSettings] = useState<SettingItem[]>([]);
   const [draft, setDraft] = useState<Record<string, SettingDraftValue>>({});
@@ -221,7 +246,12 @@ function GeneralSettingsPanel() {
             {settings.map((item) => (
               <div class="settings-row" key={item.key}>
                 <div>
-                  <strong>{item.description || item.key}</strong>
+                  <strong>
+                    {item.description || item.key}
+                    {SETTING_HELP[item.key] && (
+                      <FieldHelp label={item.description || item.key} inline>{SETTING_HELP[item.key]}</FieldHelp>
+                    )}
+                  </strong>
                   <small>{item.key}</small>
                 </div>
                 {item.valueType === "boolean" ? (
@@ -352,17 +382,26 @@ function JobTypesPanel() {
         <form class="panel sticky-form" onSubmit={save}>
           <h2>{editingId ? "編輯職務類型" : "新增職務類型"}</h2>
           <label>名稱<input value={form.name} onInput={(event) => setForm({ ...form, name: event.currentTarget.value })} required /></label>
-          <label>
-            必修級距（累進）
+          <Field
+            label="必修級距（累進）"
+            help={<>這個職務類型的員工必修到哪一級。<strong>累進代表「級距以下全包」</strong>：
+              選「中」的職務，必修包含所有低階與中階課程，不是只有中階。
+              這是整套必修計算的源頭，改動會立刻影響完訓率與往後新排場次的應上名單
+              （不回溯既有場次）。</>}
+          >
             <select value={form.requiredLevel} onChange={(event) => setForm({ ...form, requiredLevel: Number(event.currentTarget.value) })}>
               <option value="1">{REQUIRED_LEVEL_HELP[1]}</option>
               <option value="2">{REQUIRED_LEVEL_HELP[2]}</option>
               <option value="3">{REQUIRED_LEVEL_HELP[3]}</option>
             </select>
-          </label>
-          <label class="inline-check">
-            <input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.currentTarget.checked })} /> 啟用
-          </label>
+          </Field>
+          <div class="field">
+            <label class="inline-check">
+              <input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.currentTarget.checked })} /> 啟用
+            </label>
+            <FieldHelp label="啟用">停用後不會出現在員工的職務類型選項中，但已套用此類型的員工不受影響。
+              用於淘汰不再使用的職務分類，而不必去改動既有員工資料。</FieldHelp>
+          </div>
           <div class="button-row">
             <button class="primary">{editingId ? "更新" : "建立"}</button>
             {editingId && <button type="button" class="secondary" onClick={cancelEdit}>取消</button>}
