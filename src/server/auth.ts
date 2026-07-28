@@ -1,4 +1,5 @@
 import { ApiError, parseJson, requiredString, uuid } from "./http";
+import { assertHuman } from "./turnstile";
 import type { AuthUser } from "./types";
 
 const SESSION_COOKIE = "hr_session";
@@ -21,6 +22,7 @@ interface UserRow {
 interface LoginBody {
   email?: unknown;
   password?: unknown;
+  turnstileToken?: unknown;
 }
 
 interface ChangePasswordBody {
@@ -123,8 +125,18 @@ export async function authenticate(request: Request, db: D1Database): Promise<Au
   return row ? publicUser(row) : null;
 }
 
-export async function login(request: Request, db: D1Database): Promise<{ user: AuthUser; cookie: string }> {
+export async function login(
+  request: Request,
+  env: { DB: D1Database },
+): Promise<{ user: AuthUser; cookie: string }> {
+  const db = env.DB;
   const body = await parseJson<LoginBody>(request);
+
+  // 人機驗證擺在最前面，先於欄位檢查與密碼雜湊。密碼比對是 PBKDF2 10 萬輪，
+  // 是這支端點最貴的動作；驗證若擺在它之後，機器人照樣能把 CPU 吃光，等於
+  // 只擋住了「猜中」而沒擋住「猜」。
+  await assertHuman(request, env, body.turnstileToken);
+
   const email = requiredString(body.email, "電子郵件", 200).toLowerCase();
   const password = requiredString(body.password, "密碼", 200);
   const row = await loadUserByEmail(db, email);

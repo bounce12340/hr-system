@@ -16,6 +16,7 @@ import { handleAdminM4 } from "./m4";
 import { handleAdminM5, handleEmployeeM5 } from "./m5";
 import { handlePublicPasswordSetup } from "./password-setup";
 import { handleAdminSettings } from "./settings";
+import { turnstileSiteKey } from "./turnstile";
 import type { ApiContext } from "./types";
 
 function corsPreflight(request: Request): Response {
@@ -43,8 +44,16 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (path === "/api/health" && request.method === "GET") {
       return json({ status: "ok", timezone: "Asia/Taipei" });
     }
+    // 登入頁在還沒有人登入時就需要知道要不要顯示人機驗證框，所以這支必須公開。
+    // 只回 site key——它本來就會出現在 HTML 裡，不是機密（見 turnstile.ts）。
+    // 之所以用 API 取得而不是在 build 時打進前端：build 時忘了帶環境變數，
+    // 會變成前端沒有驗證框、後端卻要求 token，全站登不進去；改由同一個 Worker
+    // 的 env 供應，兩邊必定同步。
+    if (path === "/api/public-config" && request.method === "GET") {
+      return json({ turnstileSiteKey: turnstileSiteKey(env) });
+    }
     if (path === "/api/auth/login" && request.method === "POST") {
-      const result = await login(request, env.DB);
+      const result = await login(request, env);
       return json({ user: result.user }, 200, { "Set-Cookie": result.cookie });
     }
     // 密碼設定連結與忘記密碼是公開端點，必須擺在 authenticate 之前：

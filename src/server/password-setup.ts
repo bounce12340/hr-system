@@ -1,6 +1,7 @@
 import { assertPasswordStrength, hashPassword } from "./auth";
 import { ApiError, json, parseJson, requiredString, uuid } from "./http";
 import { sendMail } from "./mailer";
+import { assertHuman } from "./turnstile";
 
 /**
  * 一次性密碼設定連結（migrations/0012_password_setup_tokens.sql）。
@@ -381,7 +382,15 @@ const FORGOT_PASSWORD_MESSAGE =
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 async function forgotPassword(request: Request, env: { DB: D1Database }): Promise<Response> {
-  const body = await parseJson<{ email?: unknown }>(request);
+  const body = await parseJson<{ email?: unknown; turnstileToken?: unknown }>(request);
+
+  // 擺在查帳號與寄信之前。這支端點沒有密碼雜湊的成本，但會**寄信**——放著不擋，
+  // 等於提供一支任何人都能驅動、以本系統名義對任意信箱發信的介面。
+  //
+  // 驗證結果只取決於 token，與 email 是否存在無關，因此不會破壞本端點「不得
+  // 洩漏帳號是否存在」的性質（見 FORGOT_PASSWORD_MESSAGE 上方說明）。
+  await assertHuman(request, env, body.turnstileToken);
+
   const email = requiredString(body.email, "電子郵件", 200).toLowerCase();
 
   // 格式不合法也不另外報錯——422 與 200 的差異一樣是可觀察的訊號。

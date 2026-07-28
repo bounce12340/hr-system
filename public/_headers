@@ -3,4 +3,13 @@
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+
+# challenges.cloudflare.com 是 Turnstile 人機驗證，登入頁與忘記密碼會用到，
+# script-src 與 frame-src 兩項缺一不可（widget 本體是一個 iframe）。
+#
+# 這裡漏掉的話，症狀是**全站沒有人能登入**：前端載不到 widget 就產不出 token，
+# 而後端在啟用狀態下沒有 token 一律擋下（見 src/server/turnstile.ts）。而且
+# 本機若沒設定 Turnstile 金鑰完全不會發現——那條路徑根本不會載入這支指令碼。
+#
+# frame-ancestors 'none' 管的是「誰能內嵌我們」，與我們內嵌誰無關，不必放寬。

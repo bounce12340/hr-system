@@ -58,6 +58,9 @@ textarea { min-height: 92px; resize: vertical; }
 .demo-hint { margin-top: 1.5rem; padding: .8rem; background: #f4f7f4; color: var(--muted); font-size: .78rem; border-radius: 9px; max-width: 420px; }
 .login-link-button { display: block; background: transparent; border: 0; padding: 0; margin-top: 1rem; color: var(--green-2); font-weight: 700; text-decoration: underline; text-align: left; }
 .login-link-button:hover { color: var(--green); }
+/* Turnstile 會在這個容器內插入自己的 iframe（固定 300x65）。這裡只留最小高度
+   佔位，避免 widget 載入完成時把送出鈕往下推而造成誤點。 */
+.turnstile-widget { min-height: 65px; }
 
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 230px 1fr; }
 .sidebar { position: sticky; top: 0; height: 100vh; background: #103d38; color: white; padding: 1.5rem 1rem; display: flex; flex-direction: column; }

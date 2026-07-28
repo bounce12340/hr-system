@@ -1,5 +1,6 @@
 import { ApiError, json, parseJson, requireAdmin, requiredString } from "./http";
 import { describeMailResult, isMailerConfigured, sendMail } from "./mailer";
+import { isTurnstileEnabled } from "./turnstile";
 import type { ApiContext } from "./types";
 
 /**
@@ -217,6 +218,10 @@ export async function handleAdminSettings(context: ApiContext, path: string): Pr
       settings: await listSettings(context.env.DB),
       // 讓設定頁能顯示寄信服務是否就緒，而不必等到實際寄信才知道。
       mailerConfigured: isMailerConfigured(context.env),
+      // 同理。Turnstile 需要 site key 與 secret key 成對才會啟用，只設一半會
+      // 靜默退回未啟用（見 turnstile.ts）；沒有這個顯示，管理者會以為已經有
+      // 防護。
+      turnstileConfigured: isTurnstileEnabled(context.env),
     });
   }
   if (context.request.method === "PATCH") {

@@ -39,6 +39,7 @@ export function SystemSettingsPage() {
         「個人資料」頁共用同一個元件。
       */}
       <ChangePasswordPanel />
+      <LoginProtectionPanel />
       <MailSettingsPanel />
       <GeneralSettingsPanel />
       <JobTypesPanel />
@@ -53,6 +54,50 @@ export function SystemSettingsPage() {
  * 讀回檢查，設錯也只會在實際寄信時才失敗。此處提供主動驗證的入口。
  * 畫面上只顯示「是否已設定」，不顯示也不取得任何金鑰內容。
  */
+/**
+ * 登入保護（Cloudflare Turnstile）狀態。
+ *
+ * 只顯示是否啟用，不顯示也不取得任何金鑰。這個面板存在的理由是 turnstile.ts
+ * 的失敗模式：site key 與 secret key 只設定一半時，系統會**靜默**退回未啟用。
+ * 那是刻意選的（另一種結果是全站登不進去），但沒有這裡的顯示，管理者會誤以為
+ * 登入已經受保護。
+ */
+function LoginProtectionPanel() {
+  const [configured, setConfigured] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    void api<{ turnstileConfigured?: boolean }>("/api/admin/settings")
+      .then((data) => setConfigured(Boolean(data.turnstileConfigured)))
+      .catch(() => setConfigured(null));
+  }, []);
+
+  return (
+    <section class="panel section-title">
+      <div class="panel-heading">
+        <h2>登入保護</h2>
+        {configured !== null && (
+          <span class={`status ${configured ? "ok" : "warning"}`}>
+            {configured ? "已啟用" : "未啟用"}
+          </span>
+        )}
+      </div>
+      {configured === true && (
+        <p class="muted-copy">
+          登入頁與忘記密碼已啟用 Cloudflare Turnstile 人機驗證，未通過驗證的請求
+          在比對密碼之前就會被擋下。
+        </p>
+      )}
+      {configured === false && (
+        <div class="alert warning">
+          尚未啟用人機驗證，登入端點可被自動化程式反覆嘗試密碼。請設定
+          <code>TURNSTILE_SITE_KEY</code> 與 <code>TURNSTILE_SECRET_KEY</code>
+          （兩者需成對，只設一項會維持未啟用）。
+        </div>
+      )}
+    </section>
+  );
+}
+
 function MailSettingsPanel() {
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [to, setTo] = useState("");

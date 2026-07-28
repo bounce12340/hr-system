@@ -104,6 +104,33 @@ npm run db:reset:local         # 重置本機 D1 並重跑 migration（只動本
 - 所有 admin API 在 API 層驗證角色；employee API 從 session 的 `employee_id` 決定資料範圍，不接受前端傳入他人 ID。
 - mutation 檢查 `Origin` 並限定 JSON body；錯誤訊息不回傳 stack trace。
 - 核薪與薪酬資料僅能透過 M3 admin API 讀寫；employee API 不查詢或回傳任何薪資資料。
+- 登入與忘記密碼可加上 Cloudflare Turnstile 人機驗證，擋自動化猜密碼（見下節）。
+
+### 人機驗證（Cloudflare Turnstile）
+
+以兩個環境變數啟用，**兩者必須成對**，只設一項會靜默維持未啟用（管理者可在「系統設定 → 登入保護」看到目前狀態）：
+
+```bash
+npx wrangler pages secret put TURNSTILE_SITE_KEY --project-name hr-system
+npx wrangler pages secret put TURNSTILE_SECRET_KEY --project-name hr-system
+```
+
+本機開發放 `.dev.vars`（已列入 `.gitignore`），可直接用 Cloudflare 的
+[測試金鑰](https://developers.cloudflare.com/turnstile/troubleshooting/testing/)：
+site key `1x00000000000000000000AA`、secret `1x0000000000000000000000000000000AA`。
+
+改動這一區時要知道的四件事：
+
+1. **驗證在後端 `/api/auth/login` 裡面，不是在前端擋送出。** 前端擋對暴力破解無效——機器人不執行你的 JS，直接 POST 就繞過去了。實作在 `src/server/turnstile.ts`，呼叫點刻意排在 PBKDF2 之前，否則擋得住「猜中」卻擋不住「猜」。
+2. **`public/_headers` 的 CSP 必須含 `script-src` 與 `frame-src` 的 `https://challenges.cloudflare.com`。** 漏掉的症狀是全站沒有人能登入，而且本機未設定金鑰時完全不會發現。
+3. **登入表單與忘記密碼表單的 `<TurnstileWidget>` 必須有不同的 `key`。** 兩者在 DOM 中型別與位置相同，Preact 會重用同一個元件實例，導致忘記密碼的送出鈕永遠鎖住。
+4. **測試環境一律關閉**（`vitest.config.ts` 以空字串覆蓋）。否則本機設了金鑰就會有十幾個測試檔一起垮，且失敗訊息看不出成因。
+
+服務中斷時的緊急處置是移除 secret 退回未啟用——設計上是 fail closed，siteverify 連不上會回 `503` 而非 `403`，用狀態碼即可分辨：
+
+```bash
+npx wrangler pages secret delete TURNSTILE_SECRET_KEY --project-name hr-system
+```
 
 ## M2 功能
 
