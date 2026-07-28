@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, jsonBody } from "../api";
+import { Field, FieldHelp } from "../components/FieldHelp";
 import type { Employee } from "../types";
 
 // ---- 後端回傳型別，對應 src/server/m5.ts（base /api/admin/talent）----
@@ -179,7 +180,11 @@ function CompetencyModelsPage() {
           <div class="panel-heading"><h2>{form.id ? "編輯職能項目" : "新增職能項目"}</h2>{form.id && <button type="button" class="secondary" onClick={() => setForm(emptyCompetency)}>取消</button>}</div>
           <label>職位別<input value={form.positionTitle} onInput={(event) => setForm({ ...form, positionTitle: event.currentTarget.value })} required /></label>
           <label>職能項目<input value={form.competencyName} onInput={(event) => setForm({ ...form, competencyName: event.currentTarget.value })} required /></label>
-          <label>等級要求（1–5）<input type="number" min="1" max="5" value={form.requiredLevel} onInput={(event) => setForm({ ...form, requiredLevel: Number(event.currentTarget.value) })} required /></label>
+          <Field
+            label="等級要求（1–5）"
+            help={<>擔任這個職位在該職能上至少要達到的水準。1 為入門、5 為專家。
+              這是<strong>職能盤點</strong>用的量表，與課程的低／中／高職能級別是兩套不同的東西。</>}
+          ><input type="number" min="1" max="5" value={form.requiredLevel} onInput={(event) => setForm({ ...form, requiredLevel: Number(event.currentTarget.value) })} required /></Field>
           <label>說明<textarea value={form.description} onInput={(event) => setForm({ ...form, description: event.currentTarget.value })} /></label>
           <button class="primary" type="submit">{form.id ? "更新" : "建立"}</button>
         </form>
@@ -336,13 +341,26 @@ function NineGridPage() {
             <div class="modal-title"><div><p class="eyebrow">NINE-GRID</p><h2>{target.name} 的落點</h2></div><button class="icon-button" onClick={() => setTarget(null)}>×</button></div>
             <form onSubmit={(event) => void savePlacement(event)}>
               <div class="form-grid">
-                <label>績效<select value={form.performance} onChange={(event) => setForm({ ...form, performance: Number(event.currentTarget.value) })}>
+                <Field
+                  label="績效"
+                  help={<>看的是<strong>過去已經做出來的成果</strong>，對應九宮格的橫軸。
+                    與潛力分開評——現在表現好不代表能承擔更大的職責。</>}
+                ><select value={form.performance} onChange={(event) => setForm({ ...form, performance: Number(event.currentTarget.value) })}>
                   {PERFORMANCE_LEVELS.map((level) => <option value={level}>{scaleLabel(level)}</option>)}
-                </select></label>
-                <label>潛力<select value={form.potential} onChange={(event) => setForm({ ...form, potential: Number(event.currentTarget.value) })}>
+                </select></Field>
+                <Field
+                  label="潛力"
+                  help={<>看的是<strong>未來能否勝任更高或更廣的職責</strong>，對應九宮格的縱軸。
+                    判斷依據是學習速度與適應力，不是目前的績效分數。</>}
+                ><select value={form.potential} onChange={(event) => setForm({ ...form, potential: Number(event.currentTarget.value) })}>
                   {POTENTIAL_LEVELS.map((level) => <option value={level}>{scaleLabel(level)}</option>)}
-                </select></label>
-                <label class="full">評核期間<input value={form.reviewPeriod} onInput={(event) => setForm({ ...form, reviewPeriod: event.currentTarget.value })} required /></label>
+                </select></Field>
+                <Field
+                  className="full"
+                  label="評核期間"
+                  help={<>這次落點對應的期間（例如「2026 上半年」）。同一位員工可以有多筆不同期間的
+                    落點，用來看他在九宮格上的移動軌跡，所以<strong>請維持一致的寫法</strong>。</>}
+                ><input value={form.reviewPeriod} onInput={(event) => setForm({ ...form, reviewPeriod: event.currentTarget.value })} required /></Field>
                 <label class="full">備註<textarea value={form.notes} onInput={(event) => setForm({ ...form, notes: event.currentTarget.value })} /></label>
               </div>
               <Message text={error} error />
@@ -495,9 +513,13 @@ function KeyPositionsPage() {
             <option value="">無／從缺</option>
             {employees.map((employee) => <option value={employee.id}>{employee.employeeNo}・{employee.name}（{employee.department}）</option>)}
           </select></label>
-          <label>風險等級<select value={form.riskLevel} onChange={(event) => setForm({ ...form, riskLevel: event.currentTarget.value as KeyPosition["riskLevel"] })}>
+          <Field
+            label="風險等級"
+            help={<>這個職位一旦出缺，對營運的衝擊有多大、多難補人。<strong>高風險</strong>代表
+              短期內找不到替代人選，應優先建立接班人選並追蹤其準備度。與現任者的個人表現無關。</>}
+          ><select value={form.riskLevel} onChange={(event) => setForm({ ...form, riskLevel: event.currentTarget.value as KeyPosition["riskLevel"] })}>
             <option value="low">低</option><option value="medium">中</option><option value="high">高</option>
-          </select></label>
+          </select></Field>
           <label>備註<textarea value={form.notes} onInput={(event) => setForm({ ...form, notes: event.currentTarget.value })} /></label>
           <button class="primary" type="submit">{form.id ? "更新" : "建立"}</button>
         </form>
@@ -522,7 +544,17 @@ function KeyPositionsPage() {
 
       {selectedPosition && (
         <div class="panel section-title">
-          <div class="panel-heading"><h2>{selectedPosition.title}－繼任者名單</h2></div>
+          <div class="panel-heading">
+            <h2>
+              {selectedPosition.title}－繼任者名單
+              <FieldHelp label="接班準備度" inline>
+                每位人選旁的下拉是<strong>接班準備度</strong>：距離能實際接任還有多遠。
+                「可立即接任」代表現在就能上任；其餘選項代表還需要多久的準備。
+                這是盤點<strong>接班風險</strong>用的——高風險職位若名單裡沒有任何一位可立即接任，
+                就是需要優先處理的缺口。
+              </FieldHelp>
+            </h2>
+          </div>
           <div class="card-list">
             {successors.map((successor) => (
               <div class="successor-row" key={successor.id}>

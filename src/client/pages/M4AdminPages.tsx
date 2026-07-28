@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import type { ChartConfiguration } from "chart.js";
 import { api } from "../api";
 import { Chart } from "../components/Chart";
+import { Field } from "../components/FieldHelp";
 import { exportCsv, exportXlsx } from "../download";
 import type { SheetRow } from "../export";
 
@@ -181,22 +182,28 @@ function ReportFilterBar({
           {gradeOptions.map((item) => <option value={item} key={item}>{item}</option>)}
         </select>
       </label>
-      <label>
-        起始月份
+      <Field
+        label="起始月份"
+        help={<>統計期間的起點，<strong>含當月</strong>。離職率的分母會取期初與期末在職人數的平均，
+          因此期間長短會改變分母，不只是改變篩選範圍。</>}
+      >
         <input
           type="month"
           value={displayStartMonth}
           onInput={(event) => onChange({ startMonth: event.currentTarget.value })}
         />
-      </label>
-      <label>
-        結束月份
+      </Field>
+      <Field
+        label="結束月份"
+        help={<>統計期間的終點。<strong>離職日當天不計入在職</strong>——當月最後一天離職的人，
+          會算進離職數而不算進期末在職人數。</>}
+      >
         <input
           type="month"
           value={displayEndMonth}
           onInput={(event) => onChange({ endMonth: event.currentTarget.value })}
         />
-      </label>
+      </Field>
     </div>
   );
 }

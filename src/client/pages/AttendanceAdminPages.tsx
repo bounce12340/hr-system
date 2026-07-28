@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { api, jsonBody } from "../api";
 import { exportCsv } from "../download";
+import { Field } from "../components/FieldHelp";
 import type { SheetRow } from "../export";
 import type { AttendanceRecord, ImportSummary } from "../types";
 
@@ -265,10 +266,22 @@ export function AttendanceManagementPage() {
           </label>
           <label>日期<input type="date" value={form.attendanceDate} onInput={(event) => setForm({ ...form, attendanceDate: event.currentTarget.value })} required /></label>
           <div class="form-grid">
-            <label>缺勤時數<input type="number" min="0" step="0.5" value={form.absenceHours} onInput={(event) => setForm({ ...form, absenceHours: event.currentTarget.value })} /></label>
-            <label>加班時數<input type="number" min="0" step="0.5" value={form.overtimeHours} onInput={(event) => setForm({ ...form, overtimeHours: event.currentTarget.value })} /></label>
+            <Field
+              label="缺勤時數"
+              help={<>當日未出勤的時數，可填 0.5 的倍數。會累計進報表的缺勤統計。
+                <strong>這裡登錄的是出勤，與課程的「出席登錄」是兩回事</strong>——請假沒來上課
+                要到「排課 → 出席登錄」登記。</>}
+            ><input type="number" min="0" step="0.5" value={form.absenceHours} onInput={(event) => setForm({ ...form, absenceHours: event.currentTarget.value })} /></Field>
+            <Field
+              label="加班時數"
+              help={<>當日超出正常工時的時數，可填 0.5 的倍數。會累計進報表的加班統計。</>}
+            ><input type="number" min="0" step="0.5" value={form.overtimeHours} onInput={(event) => setForm({ ...form, overtimeHours: event.currentTarget.value })} /></Field>
           </div>
-          <label>假別（選填）<input value={form.absenceType} onInput={(event) => setForm({ ...form, absenceType: event.currentTarget.value })} placeholder="例：事假、病假、特休" /></label>
+          <Field
+            label="假別（選填）"
+            help={<>自由輸入的假別名稱，報表會依此分組統計，因此<strong>請維持用詞一致</strong>
+              （統一寫「特休」，不要時而「年假」）。沒有缺勤時數時可留空。</>}
+          ><input value={form.absenceType} onInput={(event) => setForm({ ...form, absenceType: event.currentTarget.value })} placeholder="例：事假、病假、特休" /></Field>
           <label>備註<textarea value={form.notes} onInput={(event) => setForm({ ...form, notes: event.currentTarget.value })} /></label>
           <div class="button-row">
             <button class="primary">{editingId ? "更新" : "新增"}</button>

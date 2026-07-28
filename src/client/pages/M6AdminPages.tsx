@@ -9,6 +9,7 @@ import {
   intervalReasonText,
   monthsUntilDueText,
 } from "../components/HealthCheckHelpers";
+import { Field, FieldHelp } from "../components/FieldHelp";
 import { CertificationsPage } from "./M2AdminPages";
 import type {
   HealthCheckDueEntry,
@@ -112,8 +113,12 @@ function HealthCheckDuePage() {
           <p class="eyebrow">DUE FOR CHECKUP</p><h1>待健檢名單</h1>
           <p>依急迫度排序，逾期者最優先處理。{payload && <>目前到期提醒門檻為提前 {payload.reminderMonths} 個月（可在「系統設定」調整）。</>}</p>
         </div>
-        <label class="compact-label">
-          未來幾個月內到期
+        <Field
+          className="compact-label"
+          label="未來幾個月內到期"
+          help={<>只是這份清單的<strong>檢視範圍</strong>，改它不會影響任何提醒設定。
+            想調整實際的提醒時機請到「系統設定 → 健康檢查到期提前提醒月數」。</>}
+        >
           <input
             type="number"
             min="1"
@@ -125,7 +130,7 @@ function HealthCheckDuePage() {
               void load(value);
             }}
           />
-        </label>
+        </Field>
       </div>
       <Message text={error} error />
       <div class="matrix-legend">
@@ -284,8 +289,15 @@ function HealthCheckRecordsPage() {
             {employees.map((employee) => <option value={employee.id}>{employee.employeeNo}・{employee.name}</option>)}
           </select></label>
           <div class="form-grid">
-            <label>健檢日期<input type="date" value={form.checkDate} onInput={(event) => setForm({ ...form, checkDate: event.currentTarget.value })} required /></label>
-            <label>檢查機構<input value={form.institution} onInput={(event) => setForm({ ...form, institution: event.currentTarget.value })} placeholder="選填" /></label>
+            <Field
+              label="健檢日期"
+              help={<>實際受檢日，<strong>下次應檢日以此為基準推算</strong>。填錯會讓提醒時機整個位移。
+                從未健檢的員工則改以到職日推算。</>}
+            ><input type="date" value={form.checkDate} onInput={(event) => setForm({ ...form, checkDate: event.currentTarget.value })} required /></Field>
+            <Field
+              label="檢查機構"
+              help={<>受檢的醫院或診所名稱，供日後查詢與核對報告用。不影響任何計算，可留空。</>}
+            ><input value={form.institution} onInput={(event) => setForm({ ...form, institution: event.currentTarget.value })} placeholder="選填" /></Field>
           </div>
           <div>
             <span class="compact-label">本次健檢項目與結果</span>
@@ -415,10 +427,22 @@ function HealthCheckItemsPage() {
           <label>名稱<input value={form.name} onInput={(event) => setForm({ ...form, name: event.currentTarget.value })} required /></label>
           <div class="form-grid">
             <label>分類（選填）<input value={form.category} onInput={(event) => setForm({ ...form, category: event.currentTarget.value })} placeholder="例如：血液生化" /></label>
-            <label>排序<input type="number" min="0" max="9999" value={form.sortOrder} onInput={(event) => setForm({ ...form, sortOrder: Number(event.currentTarget.value) })} /></label>
+            <Field
+              label="排序"
+              help={<>數字小的排前面，決定登錄健檢時項目的顯示順序。相同數字則依名稱排列。</>}
+            ><input type="number" min="0" max="9999" value={form.sortOrder} onInput={(event) => setForm({ ...form, sortOrder: Number(event.currentTarget.value) })} /></Field>
           </div>
-          <label class="inline-check"><input type="checkbox" checked={form.required} onChange={(event) => setForm({ ...form, required: event.currentTarget.checked })} /> 必檢項目</label>
-          <label class="inline-check"><input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.currentTarget.checked })} /> 啟用</label>
+          <div class="field">
+            <label class="inline-check"><input type="checkbox" checked={form.required} onChange={(event) => setForm({ ...form, required: event.currentTarget.checked })} /> 必檢項目</label>
+            <FieldHelp label="必檢項目">在登錄健檢結果時會標示為「必檢」，提醒登錄者不要漏掉。
+              用於法規要求的項目。</FieldHelp>
+          </div>
+          <div class="field">
+            <label class="inline-check"><input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.currentTarget.checked })} /> 啟用</label>
+            <FieldHelp label="啟用">停用後不再出現在新的健檢登錄選項中，但<strong>既有紀錄裡的這個項目
+              完整保留</strong>。項目改版時請停用舊的、新增新的，不要直接改名——改名會讓歷史紀錄
+              看起來像是當年就檢查了新項目。</FieldHelp>
+          </div>
           <div class="button-row"><button class="primary">{editingId ? "更新" : "新增"}</button>{editingId && <button type="button" class="secondary" onClick={() => { setEditingId(null); setForm(emptyForm); }}>取消</button>}</div>
         </form>
         <div class="table-card">

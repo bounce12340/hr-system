@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, jsonBody } from "../api";
+import { Field } from "../components/FieldHelp";
 
 type RecruitmentSection =
   | "pipeline"
@@ -404,7 +405,9 @@ function TalentPoolPage() {
           <label>姓名<input value={form.name} onInput={(event) => setForm({ ...form, name: event.currentTarget.value })} required /></label>
           <label>Email<input type="email" value={form.email} onInput={(event) => setForm({ ...form, email: event.currentTarget.value })} /></label>
           <label>電話<input value={form.phone} onInput={(event) => setForm({ ...form, phone: event.currentTarget.value })} /></label>
-          <label>來源<input value={form.source} onInput={(event) => setForm({ ...form, source: event.currentTarget.value })} required /></label>
+          <Field label="來源" help={<>候選人從哪裡來（例如 104、員工推薦、獵頭）。
+            招募漏斗報表會依此分組，用來看哪個管道真正帶來錄取，因此<strong>請維持用詞一致</strong>。</>}
+          ><input value={form.source} onInput={(event) => setForm({ ...form, source: event.currentTarget.value })} required /></Field>
           <label>履歷連結<input type="url" value={form.resumeUrl} onInput={(event) => setForm({ ...form, resumeUrl: event.currentTarget.value })} /></label>
           <label>人才庫備註<textarea value={form.notes} onInput={(event) => setForm({ ...form, notes: event.currentTarget.value })} /></label>
           <button class="primary" type="submit">儲存人才</button>
@@ -576,7 +579,9 @@ function InterviewsPage() {
           <div class="panel-heading"><h2>{form.id ? "編輯面試" : "安排面試"}</h2>{form.id && <button type="button" class="secondary" onClick={() => setForm(emptyInterview)}>取消</button>}</div>
           <label>候選人／職缺<select value={form.applicationId} onChange={(event) => setForm({ ...form, applicationId: event.currentTarget.value })} required><option value="">請選擇</option>{applications.map((item) => <option value={item.id}>{item.candidateName}－{item.jobTitle}（{STATUS_LABEL[item.status]}）</option>)}</select></label>
           <div class="form-grid">
-            <label>輪次<input type="number" min="1" max="20" value={form.roundNumber} onInput={(event) => setForm({ ...form, roundNumber: Number(event.currentTarget.value) })} /></label>
+            <Field label="輪次" help={<>第幾次面試（初試填 1、複試填 2，依此類推）。
+              同一位候選人可以有多輪紀錄，輪次用來排序與辨識，不會自動遞增。</>}
+            ><input type="number" min="1" max="20" value={form.roundNumber} onInput={(event) => setForm({ ...form, roundNumber: Number(event.currentTarget.value) })} /></Field>
             <label>狀態<select value={form.status} onChange={(event) => setForm({ ...form, status: event.currentTarget.value as Interview["status"] })}><option value="scheduled">已排定</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select></label>
           </div>
           <label>日期時間<input type="datetime-local" value={form.scheduledAt} onInput={(event) => setForm({ ...form, scheduledAt: event.currentTarget.value })} required /></label>
@@ -806,9 +811,13 @@ function CompensationOffersPage() {
           <form class="panel" onSubmit={(event) => void saveSalary(event)}>
             <div class="panel-heading"><div><h2>核薪紀錄</h2><small>薪資與薪酬內容僅由 admin API 提供</small></div>{salaryApprovals.some((item) => item.applicationId === applicationId) && <button type="button" class="danger-action secondary" onClick={() => void removeRecord("salary")}>刪除</button>}</div>
             <div class="form-grid">
-              <label>期望薪資<input type="number" min="0" value={salary.expectedSalary} onInput={(event) => setSalary({ ...salary, expectedSalary: event.currentTarget.value })} /></label>
-              <label>建議薪資<input type="number" min="0" value={salary.suggestedSalary} onInput={(event) => setSalary({ ...salary, suggestedSalary: event.currentTarget.value })} /></label>
-              <label>核定薪資<input type="number" min="0" value={salary.approvedSalary} onInput={(event) => setSalary({ ...salary, approvedSalary: event.currentTarget.value })} /></label>
+              <Field label="期望薪資" help={<>候選人自己提出的期待，只是談判的起點，不會用在任何通知上。</>}
+              ><input type="number" min="0" value={salary.expectedSalary} onInput={(event) => setSalary({ ...salary, expectedSalary: event.currentTarget.value })} /></Field>
+              <Field label="建議薪資" help={<>用人單位或人資評估後的建議數字，供核決者參考，同樣不會出現在錄取通知。</>}
+              ><input type="number" min="0" value={salary.suggestedSalary} onInput={(event) => setSalary({ ...salary, suggestedSalary: event.currentTarget.value })} /></Field>
+              <Field label="核定薪資" help={<><strong>最終定案的數字，會被帶進錄取通知範本。</strong>
+                產生通知前請先確認這一欄，改了之後要重新產生範本才會更新。</>}
+              ><input type="number" min="0" value={salary.approvedSalary} onInput={(event) => setSalary({ ...salary, approvedSalary: event.currentTarget.value })} /></Field>
               <label>狀態<select value={salary.status} onChange={(event) => setSalary({ ...salary, status: event.currentTarget.value as SalaryApproval["status"] })}><option value="draft">草稿</option><option value="submitted">送審</option><option value="approved">核准</option><option value="rejected">退回</option></select></label>
             </div>
             <label>薪酬說明<textarea value={salary.compensationNotes} onInput={(event) => setSalary({ ...salary, compensationNotes: event.currentTarget.value })} placeholder="獎金、津貼、其他條件" /></label>
@@ -1151,7 +1160,9 @@ function ProbationsPage() {
           <label>來源應徵紀錄（選填）<select value={form.candidateApplicationId} onChange={(event) => setForm({ ...form, candidateApplicationId: event.currentTarget.value })}><option value="">不關聯</option>{applications.map((item) => <option value={item.id}>{item.candidateName}－{item.jobTitle}</option>)}</select></label>
           <div class="form-grid">
             <label>到職日<input type="date" value={form.startDate} onInput={(event) => setForm({ ...form, startDate: event.currentTarget.value })} required /></label>
-            <label>試用期天數<input type="number" min="1" max="730" value={form.durationDays} onInput={(event) => setForm({ ...form, durationDays: Number(event.currentTarget.value) })} required /></label>
+            <Field label="試用期天數" help={<>自到職日起算。系統會依此推算試用期屆滿日，
+              並在上方設定的「提前提醒天數」內於管理儀表板提醒，避免錯過考核時點。</>}
+            ><input type="number" min="1" max="730" value={form.durationDays} onInput={(event) => setForm({ ...form, durationDays: Number(event.currentTarget.value) })} required /></Field>
           </div>
           <label>結果<select value={form.result} onChange={(event) => setForm({ ...form, result: event.currentTarget.value as typeof form.result })}><option value="">追蹤中</option><option value="passed">通過</option><option value="extended">延長</option><option value="failed">不通過</option></select></label>
           <label>備註<textarea value={form.notes} onInput={(event) => setForm({ ...form, notes: event.currentTarget.value })} /></label>
