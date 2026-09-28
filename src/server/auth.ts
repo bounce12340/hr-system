@@ -62,7 +62,7 @@ async function secureEqual(first: Uint8Array, second: Uint8Array): Promise<boole
     crypto.subtle.digest("SHA-256", first),
     crypto.subtle.digest("SHA-256", second),
   ]);
-  return crypto.subtle.timingSafeEqual(firstHash, secondHash);
+  return crypto.timingSafeEqual(firstHash, secondHash);
 }
 
 async function hashToken(token: string): Promise<string> {
