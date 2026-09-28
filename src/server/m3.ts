@@ -7,6 +7,7 @@ import {
   requiredString,
   uuid,
 } from "./http";
+import { convertHiredApplication } from "./onboarding-conversion";
 import type { ApiContext, AuthUser } from "./types";
 
 const PIPELINE_STAGES = [
@@ -1336,6 +1337,11 @@ export async function handleAdminM3(
   if (applicationMatch?.[1] && context.request.method === "DELETE") {
     return deleteApplication(context, applicationMatch[1]);
   }
+  const conversionMatch = path.match(/^\/api\/admin\/recruitment\/applications\/([^/]+)\/convert-employee$/);
+  if (conversionMatch?.[1] && context.request.method === "POST") {
+    return convertHiredApplication(context, admin, conversionMatch[1]);
+  }
+
   if (path === `${base}/funnel` && context.request.method === "GET") {
     return funnelStats(context);
   }

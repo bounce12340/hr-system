@@ -196,7 +196,7 @@ async function updateTrainingSettings(context: ApiContext): Promise<Response> {
   return json({ settings: await getTrainingSettings(context.env.DB) });
 }
 
-async function expiryReminders(db: D1Database, employeeId?: string): Promise<ExpiryReminderRow[]> {
+export async function expiryReminders(db: D1Database, employeeId?: string): Promise<ExpiryReminderRow[]> {
   const settings = await getTrainingSettings(db);
   const employeeFilter = employeeId ? "AND ec.employee_id = ?" : "";
   const statement = db.prepare(`
