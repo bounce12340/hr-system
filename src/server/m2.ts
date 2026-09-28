@@ -521,16 +521,43 @@ async function createTest(context: ApiContext): Promise<Response> {
 
 async function updateTest(context: ApiContext, id: string): Promise<Response> {
   const test = parseTest(await parseJson<TestInput>(context.request));
-  const result = await context.env.DB.prepare(`
-    UPDATE tests SET course_session_id = ?, name = ?, passing_score = ? WHERE id = ?
-  `).bind(test.courseSessionId, test.name, test.passingScore, id).run();
-  if (result.meta.changes === 0) throw new ApiError(404, "找不到指定測驗。");
-  await context.env.DB.prepare(`
-    UPDATE test_results
-    SET passed = CASE WHEN score >= ? THEN 1 ELSE 0 END,
-        retraining_required = CASE WHEN score >= ? THEN 0 ELSE 1 END
-    WHERE test_id = ?
-  `).bind(test.passingScore, test.passingScore, id).run();
+  const existing = await context.env.DB.prepare(`
+    SELECT course_session_id AS courseSessionId FROM tests WHERE id = ?
+  `).bind(id).first<{ courseSessionId: string }>();
+  if (!existing) throw new ApiError(404, "找不到指定測驗。");
+  if (existing.courseSessionId !== test.courseSessionId) {
+    const scored = await context.env.DB.prepare(
+      "SELECT 1 AS found FROM test_results WHERE test_id = ? LIMIT 1",
+    ).bind(id).first();
+    if (scored) throw new ApiError(409, "此測驗已有成績，不能更換場次；請保留原場次以維持成績關聯。" );
+    const session = await context.env.DB.prepare(
+      "SELECT id FROM course_sessions WHERE id = ?",
+    ).bind(test.courseSessionId).first();
+    if (!session) throw new ApiError(404, "找不到指定場次。");
+    const result = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        UPDATE tests SET course_session_id = ?, name = ?, passing_score = ?
+        WHERE id = ? AND NOT EXISTS (
+          SELECT 1 FROM test_results WHERE test_id = tests.id
+        )
+      `).bind(test.courseSessionId, test.name, test.passingScore, id),
+    ]);
+    if (result[0]?.meta.changes === 0) {
+      throw new ApiError(409, "此測驗已有成績，不能更換場次；請保留原場次以維持成績關聯。");
+    }
+  } else {
+    await context.env.DB.batch([
+      context.env.DB.prepare(`
+        UPDATE tests SET name = ?, passing_score = ? WHERE id = ?
+      `).bind(test.name, test.passingScore, id),
+      context.env.DB.prepare(`
+        UPDATE test_results
+        SET passed = CASE WHEN score >= ? THEN 1 ELSE 0 END,
+            retraining_required = CASE WHEN score >= ? THEN 0 ELSE 1 END
+        WHERE test_id = ?
+      `).bind(test.passingScore, test.passingScore, id),
+    ]);
+  }
   return json({ id, ...test });
 }
 
@@ -574,17 +601,26 @@ async function recordTestResults(context: ApiContext, id: string): Promise<Respo
   if (records.some((record) => !enrolledIds.has(record.employeeId))) {
     throw new ApiError(422, "成績名單包含未參加此場次的員工。");
   }
-  await context.env.DB.batch(records.map((record) => {
-    const passed = record.score >= test.passingScore ? 1 : 0;
+  const results = await context.env.DB.batch(records.map((record) => {
     return context.env.DB.prepare(`
       INSERT INTO test_results (
         id, test_id, employee_id, score, passed, retraining_required, recorded_at
-      ) VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      )
+      SELECT ?, t.id, ?, ?,
+             CASE WHEN ? >= t.passing_score THEN 1 ELSE 0 END,
+             CASE WHEN ? >= t.passing_score THEN 0 ELSE 1 END,
+             strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      FROM tests t WHERE t.id = ? AND t.course_session_id = ?
       ON CONFLICT(test_id, employee_id) DO UPDATE SET
         score = excluded.score, passed = excluded.passed,
         retraining_required = excluded.retraining_required, recorded_at = excluded.recorded_at
-    `).bind(uuid(), id, record.employeeId, record.score, passed, passed ? 0 : 1);
+    `).bind(uuid(), record.employeeId, record.score, record.score, record.score, id, test.courseSessionId);
   }));
+  // All statements share the same expected session inside an atomic batch.
+  // If the test moved since validation, none can write a score to the old roster.
+  if (results.some((result) => result.meta.changes === 0)) {
+    throw new ApiError(409, "測驗場次已變更，請重新整理名單後再登錄成績。");
+  }
   return json({ recordedCount: records.length });
 }
 

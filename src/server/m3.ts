@@ -564,18 +564,29 @@ async function transitionApplication(
     );
   }
   await assertTransitionRequirements(context.env.DB, application, target);
-  await context.env.DB.batch([
+  const results = await context.env.DB.batch([
+    // The history row is inserted only if the status observed before validation is
+    // still current when this atomic batch begins. This prevents a stale read from
+    // recording a transition that the conditional UPDATE cannot perform.
+    context.env.DB.prepare(`
+      INSERT INTO candidate_application_status_history (
+        id, application_id, from_status, to_status, changed_by, note
+      )
+      SELECT ?, id, status, ?, ?, ?
+      FROM candidate_applications
+      WHERE id = ? AND status = ?
+    `).bind(uuid(), target, admin.id, note, id, application.status),
     context.env.DB.prepare(`
       UPDATE candidate_applications
       SET status = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE id = ? AND status = ?
     `).bind(target, id, application.status),
-    context.env.DB.prepare(`
-      INSERT INTO candidate_application_status_history (
-        id, application_id, from_status, to_status, changed_by, note
-      ) VALUES (?, ?, ?, ?, ?, ?)
-    `).bind(uuid(), id, application.status, target, admin.id, note),
   ]);
+  // Inspect the INSERT's own affected-row count, not changes() in a later
+  // statement: D1 batch transactions do not promise that cross-statement state.
+  if (results[0]?.meta.changes !== 1) {
+    throw new ApiError(409, "應徵階段已由其他操作更新，請重新整理後再試。");
+  }
   return json({ id, fromStatus: application.status, status: target });
 }
 

@@ -163,6 +163,17 @@ describe("M2 測驗紀錄", () => {
       { employeeId: "emp-003", passed: 0, retrainingRequired: 1 },
     ]);
 
+    const blockedMove = await call(`/api/admin/tests/${testId}`, adminJson("PATCH", {
+      courseSessionId: "cs-02",
+      name: "不得移動的測驗",
+      passingScore: 90,
+    }));
+    expect(blockedMove.response.status).toBe(409);
+    const unchangedSession = await env.DB.prepare(
+      "SELECT course_session_id AS courseSessionId FROM tests WHERE id = ?",
+    ).bind(testId).first<{ courseSessionId: string }>();
+    expect(unchangedSession?.courseSessionId).toBe("cs-01");
+
     const updated = await call(`/api/admin/tests/${testId}`, adminJson("PATCH", {
       courseSessionId: "cs-01",
       name: "公司法規測驗（修訂）",

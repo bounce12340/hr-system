@@ -223,9 +223,13 @@ export function TestsPage() {
   const [selectedId, setSelectedId] = useState("");
   const [form, setForm] = useState({ courseSessionId: "", name: "", passingScore: 70 });
   const [scores, setScores] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState<{ courseSessionId: string; name: string; passingScore: number } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   async function load() {
+    setLoading(true);
     try {
       const [sessionData, testData] = await Promise.all([
         api<{ sessions: CourseSession[] }>("/api/admin/course-sessions"),
@@ -233,49 +237,110 @@ export function TestsPage() {
       ]);
       setSessions(sessionData.sessions);
       setTests(testData.tests);
-      if (!form.courseSessionId && sessionData.sessions[0]) {
-        setForm((current) => ({ ...current, courseSessionId: sessionData.sessions[0]?.id ?? "" }));
-      }
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "讀取失敗。"); }
+      setForm((current) => ({ ...current, courseSessionId: current.courseSessionId || sessionData.sessions[0]?.id || "" }));
+      setError("");
+      return testData.tests;
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "讀取失敗。"); return null; }
+    finally { setLoading(false); }
   }
   useEffect(() => { void load(); }, []);
   const selected = tests.find((test) => test.id === selectedId) ?? null;
-  useEffect(() => {
-    if (selected) setScores(Object.fromEntries(selected.results.map((result) => [result.employeeId, result.score === null ? "" : String(result.score)])));
-  }, [selectedId, tests]);
+  function hasUnsavedScores(test: TrainingTest | null = selected) {
+    return Boolean(test?.results.some((result) => {
+      const draft = scores[result.employeeId] ?? "";
+      const saved = result.score === null ? "" : String(result.score);
+      return draft !== saved;
+    }));
+  }
+  function selectTest(id: string) {
+    if (busy || loading || id === selectedId) return;
+    const target = tests.find((test) => test.id === id) ?? null;
+    const editingDirty = Boolean(editing && selected && (
+      editing.courseSessionId !== selected.courseSessionId ||
+      editing.name !== selected.name || editing.passingScore !== selected.passingScore
+    ));
+    if ((hasUnsavedScores() || editingDirty) && !confirm("切換測驗會捨棄尚未儲存的編輯內容，確定繼續？")) return;
+    setScores(Object.fromEntries((target?.results ?? []).map((result) => [result.employeeId, result.score === null ? "" : String(result.score)])));
+    setSelectedId(id);
+    setEditing(null); setMessage(""); setError("");
+  }
   async function create(event: Event) {
-    event.preventDefault(); setError(""); setMessage("");
+    event.preventDefault();
+    if (busy || loading) return;
+    setError(""); setMessage(""); setBusy(true);
     try {
       await api("/api/admin/tests", { method: "POST", ...jsonBody(form) });
-      setMessage("測驗已建立。"); setForm({ ...form, name: "", passingScore: 70 }); await load();
+      setMessage("測驗已建立。"); setForm((current) => ({ ...current, name: "", passingScore: 70 })); await load();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "建立失敗。"); }
+    finally { setBusy(false); }
+  }
+  function beginEdit() {
+    if (busy || loading) return;
+    if (selected) { setEditing({ courseSessionId: selected.courseSessionId, name: selected.name, passingScore: selected.passingScore }); setMessage(""); setError(""); }
+  }
+  async function saveEdit(event: Event) {
+    event.preventDefault();
+    if (busy || loading || !selected || !editing) return;
+    const changingSession = editing.courseSessionId !== selected.courseSessionId;
+    if (changingSession && selected.results.some((result) => result.score !== null)) {
+      setError("此測驗已有成績，不能更換場次；請保留原場次以維持成績關聯。"); return;
+    }
+    setBusy(true); setError(""); setMessage("");
+    try {
+      await api(`/api/admin/tests/${selected.id}`, { method: "PATCH", ...jsonBody(editing) });
+      setEditing(null); setMessage("測驗設定已儲存，既有成績已依新門檻重新判定。");
+      if (changingSession) {
+        setScores({});
+        const reloadedTests = await load();
+        if (reloadedTests) {
+          const reloaded = reloadedTests.find((test) => test.id === selected.id);
+          setScores(Object.fromEntries((reloaded?.results ?? []).map((result) => [result.employeeId, result.score === null ? "" : String(result.score)])));
+        }
+      } else {
+        await load();
+      }
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "更新失敗。"); }
+    finally { setBusy(false); }
   }
   async function saveResults() {
-    if (!selected) return;
-    const records = selected.results.filter((result) => scores[result.employeeId] !== "").map((result) => ({ employeeId: result.employeeId, score: Number(scores[result.employeeId]) }));
+    if (busy || loading || !selected) return;
+    const records = selected.results
+      .map((result) => ({ employeeId: result.employeeId, rawScore: scores[result.employeeId] ?? "" }))
+      .filter((record) => record.rawScore !== "")
+      .map((record) => ({ employeeId: record.employeeId, score: Number(record.rawScore) }));
+    if (records.some((record) => !Number.isFinite(record.score) || record.score < 0 || record.score > 100)) {
+      setError("成績必須是 0 至 100 的有效數字。"); return;
+    }
     if (records.length === 0) { setError("請至少輸入一筆成績。"); return; }
+    setBusy(true); setError(""); setMessage("");
     try {
       await api(`/api/admin/tests/${selected.id}/results`, { method: "PUT", ...jsonBody({ records }) });
       setMessage("成績已儲存，通過與補訓狀態已更新。"); await load();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "儲存失敗。"); }
+    finally { setBusy(false); }
   }
   async function remove(id: string) {
+    if (busy || loading) return;
     if (!confirm("確定刪除此測驗與所有成績？")) return;
-    try { await api(`/api/admin/tests/${id}`, { method: "DELETE" }); setSelectedId(""); await load(); }
+    setBusy(true); setError(""); setMessage("");
+    try { await api(`/api/admin/tests/${id}`, { method: "DELETE" }); setSelectedId(""); setScores({}); setEditing(null); await load(); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "刪除失敗。"); }
+    finally { setBusy(false); }
   }
   return <section>
     <div class="page-heading"><div><p class="eyebrow">TEST RECORDS</p><h1>測驗紀錄</h1><p>依場次建立測驗、登錄分數並自動標記補訓。</p></div></div>
-    <Message text={message} /><Message text={error} error />
+    <Message text={message} /><Message text={error} error />{loading && <p role="status">讀取中…</p>}
     <div class="split-layout">
-      <div><form class="panel" onSubmit={create}><h2>新增場次測驗</h2><label>場次<select value={form.courseSessionId} onChange={(event) => setForm({ ...form, courseSessionId: event.currentTarget.value })}>{sessions.map((session) => <option value={session.id}>{session.sessionDate}・{session.courseName}</option>)}</select></label><label>測驗名稱<input value={form.name} onInput={(event) => setForm({ ...form, name: event.currentTarget.value })} required /></label><Field label="通過門檻" help={<>及格分數（0–100）。低於此分數的人會被標為<strong>需補訓</strong>，
-  並出現在管理儀表板的「測驗需補訓」提醒中。</>}><input type="number" min="0" max="100" step="0.1" value={form.passingScore} onInput={(event) => setForm({ ...form, passingScore: Number(event.currentTarget.value) })} required /></Field><button class="primary">建立測驗</button></form>
-        <div class="card-list section-title">{tests.map((test) => <button class={`list-card ${selectedId === test.id ? "selected" : ""}`} onClick={() => setSelectedId(test.id)}><div><strong>{test.name}</strong><p>{test.courseName}・{test.sessionDate}・及格 {test.passingScore}</p></div><span>{test.results.filter((result) => result.score !== null).length}/{test.results.length}</span></button>)}</div>
+      <div><form class="panel" onSubmit={create}><h2>新增場次測驗</h2><label>場次<select value={form.courseSessionId} onChange={(event) => setForm({ ...form, courseSessionId: event.currentTarget.value })}>{sessions.map((session) => <option value={session.id}>{session.sessionDate}・{session.courseName}</option>)}</select></label><label>測驗名稱<input value={form.name} onInput={(event) => setForm({ ...form, name: event.currentTarget.value })} required /></label><Field label="通過門檻" help={<>及格分數（0–100）。低於此分數的人會被標為<strong>需補訓</strong>，並出現在管理儀表板的「測驗需補訓」提醒中。</>}><input type="number" min="0" max="100" step="0.1" value={form.passingScore} onInput={(event) => setForm({ ...form, passingScore: Number(event.currentTarget.value) })} required /></Field><button class="primary" disabled={busy || loading || !form.courseSessionId}>{busy ? "處理中…" : "建立測驗"}</button></form>
+        <div class="card-list section-title">{tests.map((test) => <button type="button" class={`list-card ${selectedId === test.id ? "selected" : ""}`} disabled={busy} onClick={() => selectTest(test.id)}><div><strong>{test.name}</strong><p>{test.courseName}・{test.sessionDate}・及格 {test.passingScore}</p></div><span>{test.results.filter((result) => result.score !== null).length}/{test.results.length}</span></button>)}</div>
       </div>
-      <div class="panel">{selected ? <><div class="panel-heading"><div><h2>{selected.name}</h2><small>及格門檻 {selected.passingScore} 分</small></div><button class="secondary" onClick={() => void remove(selected.id)}>刪除測驗</button></div><div class="score-list">{selected.results.map((result) => <label class="score-row"><span><strong>{result.employeeName}</strong><small>{result.employeeNo}・{result.department}</small></span><input type="number" min="0" max="100" step="0.1" value={scores[result.employeeId] ?? ""} onInput={(event) => setScores({ ...scores, [result.employeeId]: event.currentTarget.value })} placeholder="分數" /><em class={result.retrainingRequired ? "fail" : result.passed ? "pass" : ""}>{result.score === null ? "未登錄" : result.passed ? "通過" : "需補訓"}</em></label>)}</div><button class="primary" onClick={() => void saveResults()}>儲存成績</button></> : <div class="empty-state">請選擇測驗以登錄成績。</div>}</div>
+      <div class="panel">{selected ? <><div class="panel-heading"><div><h2>{selected.name}</h2><small>及格門檻 {selected.passingScore} 分</small></div><div class="row-actions"><button type="button" class="secondary" disabled={busy} onClick={beginEdit}>編輯測驗</button><button type="button" class="secondary" disabled={busy} onClick={() => void remove(selected.id)}>刪除測驗</button></div></div>
+        {editing && <form class="panel" onSubmit={(event) => void saveEdit(event)} aria-label="編輯測驗"><h3>編輯測驗設定</h3><label>場次<select required value={editing.courseSessionId} disabled={busy || loading || selected.results.some((result) => result.score !== null)} onChange={(event) => setEditing({ ...editing, courseSessionId: event.currentTarget.value })}>{sessions.map((session) => <option value={session.id}>{session.sessionDate}・{session.courseName}</option>)}</select></label><label>測驗名稱<input required disabled={busy || loading} maxLength={200} value={editing.name} onInput={(event) => setEditing({ ...editing, name: event.currentTarget.value })} /></label><Field label="通過門檻" help="調整後會立即依新門檻重算所有已登錄成績的通過／補訓狀態。已有成績時不可更換場次。"><input aria-label="編輯通過門檻" disabled={busy || loading} type="number" min="0" max="100" step="0.1" required value={editing.passingScore} onInput={(event) => setEditing({ ...editing, passingScore: Number(event.currentTarget.value) })} /></Field><button class="primary" disabled={busy}>{busy ? "儲存中…" : "儲存測驗設定"}</button><button type="button" disabled={busy || loading} onClick={() => { setEditing(null); setError(""); setMessage(""); }}>取消編輯</button></form>}
+        <div class="score-list">{selected.results.map((result) => <label class="score-row"><span><strong>{result.employeeName}</strong><small>{result.employeeNo}・{result.department}</small></span><input disabled={busy || loading} type="number" min="0" max="100" step="0.1" value={scores[result.employeeId] ?? ""} onInput={(event) => setScores({ ...scores, [result.employeeId]: event.currentTarget.value })} placeholder="分數" /><em class={result.retrainingRequired ? "fail" : result.passed ? "pass" : ""}>{result.score === null ? "未登錄" : result.passed ? "通過" : "需補訓"}</em></label>)}</div><button class="primary" disabled={busy || loading} onClick={() => void saveResults()}>{busy ? "處理中…" : "儲存成績"}</button></> : <div class="empty-state">請選擇測驗以登錄成績。</div>}</div>
     </div>
   </section>;
 }
+
 
 interface EmployeeOption {
   id: string;
