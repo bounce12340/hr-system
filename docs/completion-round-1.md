@@ -31,5 +31,11 @@ HAVING COUNT(*) > 1;
 ```
 有重複時0014會安全失敗，不會自動合併/刪除。由資料負責人決定处理。先備份/還原演練與staging，再套migration，最後上新版程式；新版upsert依賴唯一索引。
 
+## 正式 CI 驗證（2026-09-28）
+- 已正常推送 `improve/completion-round-1`；正式 GitHub Actions run：`36415304501`，最終驗證 SHA `d10a9984b5e8f45b4422de00d17d22b9f7b357a7`，兩個 Node job 均成功： [CI run](https://github.com/bounce12340/hr-system/actions/runs/36415304501)。
+- Node 22.23.2、24.21.0 各自 `npm ci`、四組 typecheck、Vitest、Vite build、Wrangler Pages Functions compile 全部通過。每個 Node job Vitest：25 files、236 tests passed。
+- CI 首次揭露 UI SSR 測試直接匯入 TSX 時走錯 React JSX runtime，已加上 Preact Vite transform與測試 tsconfig JSX 設定；接續 typecheck 揭露 Worker crypto API 誤用 `SubtleCrypto.timingSafeEqual`，已改成 SHA-256 固定長度 constant-time bytes 比較並通過正式 typecheck。
+- 本輪沒有執行 merge、部署、遠端 migration；沒有讀取正式 DB 或 Secrets。最終工作樹乾淨，遠端分支與本地 HEAD 相同。
+
 ## 尚待下一輪
 到職轉員工、主動通知、角色細分、正式seed隔離、備份維運、效期/歷史資料與其他產品擴充均未在本輪完成。不push、不合併、不部署。
