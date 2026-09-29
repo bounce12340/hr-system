@@ -63,6 +63,15 @@ async function existingConversion(db: D1Database, applicationId: string): Promis
   `).bind(applicationId).first<ExistingConversion>();
 }
 
+async function conversionWasLegacyBackfill(db: D1Database, applicationId: string): Promise<boolean> {
+  const audit = await db.prepare(`
+    SELECT details FROM audit_logs
+    WHERE action = 'onboarding.convert' AND entity_type = 'candidate_application' AND entity_id = ?
+    ORDER BY created_at DESC LIMIT 1
+  `).bind(applicationId).first<{ details: string }>();
+  return audit?.details.includes('"legacyBackfill":true') ?? false;
+}
+
 /**
  * Explicit HR conversion only. It never creates a users row or links one by email.
  * The INSERT predicate repeats all mutable eligibility checks so the D1 batch stays
@@ -89,14 +98,17 @@ export async function convertHiredApplication(context: ApiContext, admin: AuthUs
   const before = await existingConversion(db, applicationId);
   if (before) {
     if (!sameConversion(before, input)) throw new ApiError(409, "此應徵已轉為員工，重送資料與既有員工主檔不一致。");
-    return json({ applicationId, employeeId: before.employeeId, status: "onboarded", alreadyConverted: true, legacyBackfill: false });
+    return json({
+      applicationId, employeeId: before.employeeId, status: "onboarded", alreadyConverted: true,
+      legacyBackfill: await conversionWasLegacyBackfill(db, applicationId),
+    });
   }
 
   const employeeId = uuid();
   const historyId = uuid();
   const auditId = uuid();
-  const current = await db.prepare("SELECT status FROM candidate_applications WHERE id = ?").bind(applicationId).first<{ status: string }>();
-  const legacyBackfill = current?.status === "onboarded";
+  // historyId is unique and this request inserts that row only for a hired conversion,
+  // so the audit flag is the batch's own history row, not a status read before batch.
   const legacyAudit = '{"employeeCreated":true,"legacyBackfill":true}';
   const standardAudit = '{"employeeCreated":true}';
   const results = await db.batch([
@@ -132,19 +144,27 @@ export async function convertHiredApplication(context: ApiContext, admin: AuthUs
         AND EXISTS (SELECT 1 FROM recruitment_employee_conversions WHERE application_id = ? AND employee_id = ?)`)
       .bind(applicationId, applicationId, employeeId),
     db.prepare(`INSERT INTO audit_logs(id,actor_user_id,action,entity_type,entity_id,details)
-      SELECT ?, ?, 'onboarding.convert', 'candidate_application', ?, ?
+      SELECT ?, ?, 'onboarding.convert', 'candidate_application', ?,
+        CASE WHEN EXISTS (SELECT 1 FROM candidate_application_status_history WHERE id = ?)
+          THEN ? ELSE ? END
       WHERE EXISTS (SELECT 1 FROM recruitment_employee_conversions WHERE application_id = ? AND employee_id = ?)`)
-      .bind(auditId, admin.id, applicationId, legacyBackfill ? legacyAudit : standardAudit, applicationId, employeeId),
+      .bind(auditId, admin.id, applicationId, historyId, standardAudit, legacyAudit, applicationId, employeeId),
   ]);
   if (results[0]?.meta.changes === 1) {
-    return json({ applicationId, employeeId, status: "onboarded", alreadyConverted: false, legacyBackfill }, 201);
+    return json({
+      applicationId, employeeId, status: "onboarded", alreadyConverted: false,
+      legacyBackfill: results[2]?.meta.changes === 0,
+    }, 201);
   }
 
   // A competing successful batch is an idempotent retry; other predicate failures
   // deliberately remain a conflict and do not reveal another employee's details.
   const after = await existingConversion(db, applicationId);
   if (after && sameConversion(after, input)) {
-    return json({ applicationId, employeeId: after.employeeId, status: "onboarded", alreadyConverted: true, legacyBackfill: false });
+    return json({
+      applicationId, employeeId: after.employeeId, status: "onboarded", alreadyConverted: true,
+      legacyBackfill: await conversionWasLegacyBackfill(db, applicationId),
+    });
   }
   if (after) throw new ApiError(409, "此應徵已由其他管理員轉為員工；請重新整理核對。");
   throw new ApiError(409, "僅能轉換已錄取或既有到職且已完成必填到職文件、尚未建立員工的應徵；員編與Email須未使用，職務類型須啟用。");

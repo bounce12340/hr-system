@@ -72,7 +72,7 @@ async function withConcurrentWrite(path: string, cookie: string, body: object, w
     method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie }, body: JSON.stringify(body),
   }), { ...env, DB: db });
   expect(injected).toBe(true);
-  return { response, body: await response.json<Envelope<{ employeeId: string; alreadyConverted: boolean }>>() };
+  return { response, body: await response.json<Envelope<{ employeeId: string; alreadyConverted: boolean; legacyBackfill: boolean }>>() };
 }
 beforeAll(async () => { adminCookie = await login("admin@demo.local"); employeeCookie = await login("chiahao.lin@demo.local"); });
 
@@ -219,6 +219,48 @@ describe("第二輪到職轉換安全回歸", () => {
     expect(emailRace.response.status).toBe(409);
     expect(await counts(fourth.applicationId)).toEqual({ employees: 0, history: 0, audit: 0, conversions: 0 });
     await env.DB.prepare("DELETE FROM employees WHERE id IN ('race-dup','race-email')").run();
+  });
+
+  it("batch 前只把 hired 改成 onboarded 時補建成功且稽核為 legacy", async () => {
+    const { applicationId, jobTypeId, email } = await hiredApplication("狀態改到職");
+    await completeChecklist(applicationId);
+    const historyBefore = await env.DB.prepare("SELECT COUNT(*) AS n FROM candidate_application_status_history WHERE application_id = ? AND from_status = 'hired' AND to_status = 'onboarded'").bind(applicationId).first<{ n: number }>();
+    const body = conversionBody(jobTypeId, email, "stale-onboarded");
+    const created = await withConcurrentWrite(`/api/admin/recruitment/applications/${applicationId}/convert-employee`, adminCookie, body, () => env.DB.prepare("UPDATE candidate_applications SET status = 'onboarded' WHERE id = ? AND status = 'hired'").bind(applicationId).run());
+    expect(created.response.status).toBe(201);
+    expect(created.body.data?.alreadyConverted).toBe(false);
+    expect(created.body.data?.legacyBackfill).toBe(true);
+    expect(await env.DB.prepare("SELECT status FROM candidate_applications WHERE id = ?").bind(applicationId).first()).toEqual({ status: "onboarded" });
+    const historyAfter = await env.DB.prepare("SELECT COUNT(*) AS n FROM candidate_application_status_history WHERE application_id = ? AND from_status = 'hired' AND to_status = 'onboarded'").bind(applicationId).first<{ n: number }>();
+    expect(historyAfter).toEqual(historyBefore);
+    const audit = await env.DB.prepare("SELECT details FROM audit_logs WHERE entity_id = ? AND action = 'onboarding.convert'").bind(applicationId).first<{ details: string }>();
+    expect(audit?.details).toContain('"legacyBackfill":true');
+    expect(await counts(applicationId)).toEqual({ employees: 1, history: 0, audit: 1, conversions: 1 });
+    const repeat = await call<{ alreadyConverted: boolean; legacyBackfill: boolean }>(`/api/admin/recruitment/applications/${applicationId}/convert-employee`, request("POST", adminCookie, body));
+    expect(repeat.response.status).toBe(200);
+    expect(repeat.body.data?.alreadyConverted).toBe(true);
+    expect(repeat.body.data?.legacyBackfill).toBe(true);
+  });
+
+  it("batch 前只把 onboarded 改回 hired 時建立真歷程且稽核不是 legacy", async () => {
+    const { applicationId, jobTypeId, email } = await hiredApplication("狀態改回錄取");
+    await completeChecklist(applicationId);
+    await env.DB.prepare("UPDATE candidate_applications SET status = 'onboarded' WHERE id = ?").bind(applicationId).run();
+    const body = conversionBody(jobTypeId, email, "stale-hired");
+    const created = await withConcurrentWrite(`/api/admin/recruitment/applications/${applicationId}/convert-employee`, adminCookie, body, () => env.DB.prepare("UPDATE candidate_applications SET status = 'hired' WHERE id = ? AND status = 'onboarded'").bind(applicationId).run());
+    expect(created.response.status).toBe(201);
+    expect(created.body.data?.alreadyConverted).toBe(false);
+    expect(created.body.data?.legacyBackfill).toBe(false);
+    expect(await env.DB.prepare("SELECT status FROM candidate_applications WHERE id = ?").bind(applicationId).first()).toEqual({ status: "onboarded" });
+    const history = await env.DB.prepare("SELECT from_status AS fromStatus, to_status AS toStatus, note FROM candidate_application_status_history WHERE application_id = ? AND to_status = 'onboarded'").bind(applicationId).first<{ fromStatus: string; toStatus: string; note: string }>();
+    expect(history).toEqual({ fromStatus: "hired", toStatus: "onboarded", note: "HR確認到職並建立員工主檔" });
+    const audit = await env.DB.prepare("SELECT details FROM audit_logs WHERE entity_id = ? AND action = 'onboarding.convert'").bind(applicationId).first<{ details: string }>();
+    expect(audit?.details).toBe('{"employeeCreated":true}');
+    expect(await counts(applicationId)).toEqual({ employees: 1, history: 1, audit: 1, conversions: 1 });
+    const repeat = await call<{ alreadyConverted: boolean; legacyBackfill: boolean }>(`/api/admin/recruitment/applications/${applicationId}/convert-employee`, request("POST", adminCookie, body));
+    expect(repeat.response.status).toBe(200);
+    expect(repeat.body.data?.alreadyConverted).toBe(true);
+    expect(repeat.body.data?.legacyBackfill).toBe(false);
   });
 });
 

@@ -46,25 +46,48 @@
 
 ## 修復後本機驗證證據
 
-以下命令在本修復工作樹實跑，皆 exit 0，只有 wasm flag warning：
+`429637a5b39559e570f5d2f300eecd611e87bc59` 曾把下列四組 typecheck 記為本工作樹實跑 exit 0。後續獨立複查未能在本環境複現成功結束碼，該宣稱**不能**當通過證據，保留為當時紀錄、不採認：
 
 - `node node_modules/typescript/bin/tsc -p tsconfig.client.json --noEmit`
 - `node node_modules/typescript/bin/tsc -p tsconfig.worker.json --noEmit`
 - `node node_modules/typescript/bin/tsc -p tsconfig.test.json --noEmit`
 - `node node_modules/typescript/bin/tsc -p tsconfig.tools.json --noEmit`
-- `python3 scripts/verify-consistency-sqlite.py`：5 項既有探針通過。
-- `python3 scripts/verify-completion-round-2-sqlite.py`：7 項通過，含 legacy onboarded 補建不新增假歷程、員編/Email 占用阻擋。
-- `python3 scripts/verify-completion-round-2-fix-sqlite.py`：2 項通過。這是隔離 SQLite 與複製 SQL，不是 Vitest 或 D1。
-- `git diff --check`：通過。
+
+同一 commit 的本機探針紀錄（隔離 SQLite，不是 D1 或 Vitest）：
+
+- `python3 scripts/verify-consistency-sqlite.py`：當時 5 項既有探針通過。
+- `python3 scripts/verify-completion-round-2-sqlite.py`：當時 7 項通過，含 legacy onboarded 補建不新增假歷程、員編/Email 占用阻擋。
+- `python3 scripts/verify-completion-round-2-fix-sqlite.py`：當時 2 項通過。它複製 hired 正常路徑 SQL，**沒有**覆蓋下方稽核缺陷。
+- `git diff --check`：當時通過。
 - Node 同等 UTC round-trip 腳本拒絕 `2026-02-30`、`2026-02-31`、`2026-04-31`、`2023-02-29`，接受 `2024-02-29`。這不是直接執行 TS 函式。
 
-回歸測試已補真斷言：相同 payload 重送 200、同一 `employeeId`、`alreadyConverted: true`、員工/history/audit 不變；舊 transition 到職 409；legacy 補建；獨立的不存在申請、非 hired、缺文件、角色 403/未登入 401；預讀後 `batch` 前注入 D1 寫入的競態。這些測試尚未被 Vitest 執行。
+回歸測試在該 commit 已有真斷言：相同 payload 重送 200、同一 `employeeId`、`alreadyConverted: true`、員工/history/audit 不變；舊 transition 到職 409；legacy 補建；獨立的不存在申請、非 hired、缺文件、角色 403/未登入 401；預讀後 `batch` 前注入 D1 寫入的競態。那些案例尚未被 Vitest 執行。競態 proxy 只在 `batch` 被呼叫時注入，當時沒有「只改 status、員工 INSERT 仍成功」的分支。
+
+### `429637a` 稽核缺陷（已在後續本機 commit 修正，不是該 SHA 已通過）
+
+`429637a` 在 `db.batch` 前讀 `candidate_applications.status`，把 `legacyBackfill` 綁進 audit `details` 與 201。員工 INSERT 接受 `hired` 或 `onboarded`，所以預讀與 batch 真狀態可以不一致：
+
+- 預讀 `hired`、batch 時已是 `onboarded`：員工與 conversion 仍建立，history 與 status UPDATE 為 0 列，audit 卻寫成一般轉換，201 也回 `legacyBackfill: false`。
+- 預讀 `onboarded`、batch 時已是 `hired`：五句都成功且 history 是真的 `hired → onboarded`，audit 與 201 卻標 `legacyBackfill: true`。
+
+後續修正刪除 batch 外的 status 讀取。audit details 在 batch 最後一句用 `EXISTS (SELECT 1 FROM candidate_application_status_history WHERE id = 本次唯一 historyId)` 的 `CASE` 決定 standard 或 legacy。201 的 `legacyBackfill` 只在員工 INSERT 成功時由 `results[2].meta.changes === 0` 決定。相同 payload 重送與競態冪等成功改讀既有 `onboarding.convert` audit，不再硬回 `false`；前端仍用該旗標區分補建訊息。這不是 D1 runtime 實證。
+
+### 稽核修正後本機驗證（不是 D1、不是 Vitest）
+
+本次修正工作樹實跑，四組皆 exit 0，日誌只有 `disabling flag --expose_wasm` warning，沒有 error：
+
+- `node node_modules/typescript/bin/tsc -p tsconfig.client.json --noEmit`：exit 0，約 17:10:05–17:13:07。
+- `node node_modules/typescript/bin/tsc -p tsconfig.worker.json --noEmit`：exit 0，約 17:13:07–17:16:10。
+- `node node_modules/typescript/bin/tsc -p tsconfig.tools.json --noEmit`：第一次同迴圈在 480 秒總時限被截斷，只有 warning、無結束碼，**該次不採認**。分開重跑 exit 0，約 17:18:16–17:20:04。
+- `node node_modules/typescript/bin/tsc -p tsconfig.test.json --noEmit`：第一次未啟動。分開重跑 exit 0，約 17:20:04–17:22:10。
+
+同次另跑：`python3 scripts/verify-completion-round-2-fix-sqlite.py` 4 項 exit 0；`python3 scripts/verify-completion-round-2-sqlite.py` 7 項 exit 0；`python3 scripts/verify-consistency-sqlite.py` 5 項 exit 0；`git diff --check` exit 0。fix 探針的 SQL 由 `onboarding-conversion.ts` 的 batch 原文擷取，含 hired 正常、batch 前 `hired → onboarded`、batch 前 `onboarded → hired`。這只證明隔離 SQLite 依序可見時 CASE 與列數符合預期，**不是** Cloudflare D1 batch，也**不是** Vitest。新增的兩支回歸案例尚未執行。
 
 ## 驗證限制與剩餘風險
 
-- 修復後再執行一次 `node node_modules/vitest/vitest.mjs run test/completion-round-2.test.ts`，exit 1。`node_modules/.bin/vitest` 不存在；既有 `vitest.mjs` 在載入設定前失敗：`module-runner.js` 檔案存在，但 Vite `realpath` 回 ENOENT。輸出在 `/tmp/vitest-r2-fix.out`。未安裝套件、未改 lockfile、未降低 strict。Vitest 測試本體未執行，不得標通過。
+- `429637a` 再執行一次 `node node_modules/vitest/vitest.mjs run test/completion-round-2.test.ts` 為 exit 1。`node_modules/.bin/vitest` 不存在；既有 `vitest.mjs` 在載入設定前失敗：`module-runner.js` 檔案存在，但 Vite `realpath` 回 ENOENT。輸出在 `/tmp/vitest-r2-fix.out`。未安裝套件、未改 lockfile、未降低 strict。Vitest 測試本體未執行，不得標通過。後續稽核修正**不重跑** Vitest。
 - SQLite 探針不是 Cloudflare D1 runtime/transaction 實證；Vitest、Vite build、Wrangler Functions compile、瀏覽器互動、staging 與 CI 均未在本輪通過或執行，不能以第一輪 SHA 的 CI 當作本輪證據。
-- `db.batch` 的條件式 SQL 和唯一鍵已做靜態/SQLite 驗證；仍須在可正常執行的 Cloudflare Vitest/D1 相容環境做併發實證，尤其是兩個同時 conversion POST 的相同/不同 payload 分支。
+- `db.batch` 的條件式 SQL 和唯一鍵已做靜態/SQLite 驗證；仍須在可正常執行的 Cloudflare Vitest/D1 相容環境做併發實證，尤其是兩個同時 conversion POST，以及 batch 內後句是否看得到前句寫入的 history id。隔離 SQLite 依序可見不能代替這項。
 
 ## 建議下一步
 
