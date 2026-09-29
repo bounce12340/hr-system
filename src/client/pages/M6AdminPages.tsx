@@ -34,8 +34,10 @@ function Message({ text, error = false }: { text: string; error?: boolean }) {
 
 type HealthSection = "due" | "records" | "items" | "certifications";
 
-export function HealthAndCertificationsPage() {
-  const [section, setSection] = useState<HealthSection>("due");
+export function HealthAndCertificationsPage({ initialSection = "due" }: {
+  initialSection?: HealthSection;
+} = {}) {
+  const [section, setSection] = useState<HealthSection>(initialSection);
   const sections: Array<{ id: HealthSection; label: string }> = [
     { id: "due", label: "待健檢名單" },
     { id: "records", label: "健檢紀錄" },

@@ -106,8 +106,10 @@ function StatusBadge({ status }: { status: ApplicationStatus | string }) {
   );
 }
 
-export function RecruitmentPage() {
-  const [section, setSection] = useState<RecruitmentSection>("pipeline");
+export function RecruitmentPage({ initialSection = "pipeline" }: {
+  initialSection?: RecruitmentSection;
+} = {}) {
+  const [section, setSection] = useState<RecruitmentSection>(initialSection);
   const sections: Array<{ id: RecruitmentSection; label: string }> = [
     { id: "pipeline", label: "招募漏斗" },
     { id: "openings", label: "職缺" },

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { api, jsonBody } from "../api";
 import { CertificationReminderList, expiryText } from "../components/CertificationReminderList";
+import { RoleWorkbench } from "../components/RoleWorkbench";
+import type { WorkbenchTarget } from "../../shared/workbench";
 import { monthsUntilDueText } from "../components/HealthCheckHelpers";
 import { Field } from "../components/FieldHelp";
 import type {
@@ -21,7 +23,9 @@ function Message({ text, error = false }: { text: string; error?: boolean }) {
   return <div class={`alert ${error ? "error" : "success"}`}>{text}</div>;
 }
 
-export function AdminDashboard() {
+export function AdminDashboard({ onOpenTarget }: {
+  onOpenTarget: (target: WorkbenchTarget) => void;
+}) {
   const [data, setData] = useState<{
     settings: TrainingSettings;
     certificationReminders: CertificationReminder[];
@@ -79,6 +83,7 @@ export function AdminDashboard() {
         </div>
       </div>
     )}
+    <RoleWorkbench endpoint="/api/admin/workbench" onOpenTarget={onOpenTarget} />
     <div class="panel section-title">
       <div class="panel-heading"><div><h2>試用期到期提醒</h2><small>提醒天數可在「招募管理 → 試用期」設定</small></div></div>
       <div class="reminder-list">
