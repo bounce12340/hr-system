@@ -12,7 +12,9 @@
 
 - 新增管理員專用 `POST /api/admin/recruitment/applications/:id/convert-employee`。全域 `/api/admin/` 授權閘門及 M3 的 `requireAdmin` 均會執行；一般員工不可使用。
 - 要求 `confirmed: true` 及明確填寫員編、候選人同一 Email、部門、職等、職務、啟用中的職務類型與到職日；薪資可由 HR 明確留空。前端提供核對表單，不預設職等或薪資。
-- 僅允許 `hired` 應徵、必填到職文件已完成、職務類型仍啟用、候選人 Email 一致、且員編/Email 未被使用的資料。在同一個條件式 D1 batch 中重複檢查這些可變前置條件，依序建立員工、轉換對應、`hired → onboarded` 歷程、狀態與 audit log；任一前置條件失效時不建立員工。
+- 新的 hired 到職只能走顯式 `confirmed` 轉換。舊 `POST /transition` 若目標是 `onboarded`，直接回 409 並指引使用確認到職；前端不再提供「進入到職」。`hired → rejected` 仍保留。
+- 既有 `onboarded` 且沒有 conversion 的資料，可由同一端點經 HR 明確確認補建。狀態已是 `onboarded` 時不再新增 `hired → onboarded` 歷程、不改原到職歷程，audit 以 `legacyBackfill` 標記。仍完整檢查必填文件、職務類型、Email 與員編/Email 唯一性，不會依同 Email 自動綁定既有員工或建立帳號。
+- 新轉換與補建都要求必填到職文件已完成、職務類型仍啟用、候選人 Email 一致、且員編/Email 未被使用。在同一個條件式 D1 batch 中重複檢查這些可變前置條件；任一前置條件失效時不建立員工。到職日使用 UTC 日曆 round-trip，拒絕 `2026-02-30` 這類溢位日期。
 - `recruitment_employee_conversions.application_id` 主鍵與 `employee_id` 唯一鍵，保證每個應徵最多一筆轉換。相同 payload 的重送回傳同一員工及 `alreadyConverted: true`，不再新增歷程/audit；不同 payload 回 409。併發成功者可被後續相同請求辨識為冪等成功，其他情形安全回 409，不揭露其他員工資料。
 - 不建立 `users` 帳號，也不依同 Email 自動綁定任何既有帳號。沒有新增「90 天試用期」或其他新政策；既有試用期設定/流程完全保留。
 - 前端在開啟確認表單前檢查必填到職文件，尚未完成則不提交；後端仍是最終且原子化的權威檢查。
@@ -38,23 +40,29 @@
 3. 供應商 acknowledgement 逾時或未知送達時的人工覆核程序。不得盲目重試，亦不得宣稱 exactly-once。
 4. 是否要在到職轉換後建立帳號/發送邀請；目前刻意不做，須另行核准並設計帳號生命週期與身分驗證。
 
-## 本機驗證證據
+## 基底驗證證據（`df8bc3e`，保留，不視為本修復通過）
 
-全部都在此工作樹及合成/seed 資料執行：
+獨立審查在 `df8bc3e2df33f36f5c2130feb0f32cafb1210ab8` 實跑：`tsconfig.test.json` exit 2（`test/completion-round-2.test.ts:63` TS6133，`repeat` 未使用）；client/worker/tools 通過；兩支既有 SQLite 探針通過；Vitest 在載入設定前因 `module-runner.js` realpath ENOENT 失敗。本節先前寫四組 tsc 都通過，與該次審查不符，以下方修復後實跑為準。
 
-- 四組 TypeScript：
-  - `node node_modules/typescript/bin/tsc -p tsconfig.client.json --noEmit`：通過。
-  - `node node_modules/typescript/bin/tsc -p tsconfig.worker.json --noEmit`：通過。
-  - `node node_modules/typescript/bin/tsc -p tsconfig.test.json --noEmit`：通過。
-  - `node node_modules/typescript/bin/tsc -p tsconfig.tools.json --noEmit`：通過。
-- `python3 scripts/verify-consistency-sqlite.py`：通過 5 項既有一致性探針（全部 14 個舊 migration、出缺勤唯一性、招募 stale history、測驗場次/門檻）。
-- `python3 scripts/verify-completion-round-2-sqlite.py`：通過 4 項第二輪探針：全部 15 個 migration；到職條件 INSERT 僅一次/重送拒絕；缺少必填文件阻擋；outbox dedup key 與 `unknown` 狀態保留。
+## 修復後本機驗證證據
+
+以下命令在本修復工作樹實跑，皆 exit 0，只有 wasm flag warning：
+
+- `node node_modules/typescript/bin/tsc -p tsconfig.client.json --noEmit`
+- `node node_modules/typescript/bin/tsc -p tsconfig.worker.json --noEmit`
+- `node node_modules/typescript/bin/tsc -p tsconfig.test.json --noEmit`
+- `node node_modules/typescript/bin/tsc -p tsconfig.tools.json --noEmit`
+- `python3 scripts/verify-consistency-sqlite.py`：5 項既有探針通過。
+- `python3 scripts/verify-completion-round-2-sqlite.py`：7 項通過，含 legacy onboarded 補建不新增假歷程、員編/Email 占用阻擋。
+- `python3 scripts/verify-completion-round-2-fix-sqlite.py`：2 項通過。這是隔離 SQLite 與複製 SQL，不是 Vitest 或 D1。
 - `git diff --check`：通過。
-- 新增 `test/completion-round-2.test.ts` 回歸案例涵蓋：兩個相同 payload 併發請求（一個建立、另一個冪等回覆）、不同 payload 衝突重送、缺少確認、未完成到職文件、跨角色、audit/未建帳號，以及 dry-run、disabled、outbox 不寫入、非管理員拒絕。
+- Node 同等 UTC round-trip 腳本拒絕 `2026-02-30`、`2026-02-31`、`2026-04-31`、`2023-02-29`，接受 `2024-02-29`。這不是直接執行 TS 函式。
+
+回歸測試已補真斷言：相同 payload 重送 200、同一 `employeeId`、`alreadyConverted: true`、員工/history/audit 不變；舊 transition 到職 409；legacy 補建；獨立的不存在申請、非 hired、缺文件、角色 403/未登入 401；預讀後 `batch` 前注入 D1 寫入的競態。這些測試尚未被 Vitest 執行。
 
 ## 驗證限制與剩餘風險
 
-- 嘗試 `npm test -- --run test/completion-round-2.test.ts` 失敗，原因為本機 `node_modules/.bin/vitest` 缺失；直接跑 `node node_modules/vitest/vitest.mjs run test/completion-round-2.test.ts` 也在 Vite 載入設定前失敗：`node_modules/vite/dist/node/module-runner.js` 不存在（先前已知 iOS/native rolldown/Vite 依賴不完整問題）。未修改 lockfile、未降低測試或安全檢查、未以 SQLite 冒充 Vitest/D1。
+- 修復後再執行一次 `node node_modules/vitest/vitest.mjs run test/completion-round-2.test.ts`，exit 1。`node_modules/.bin/vitest` 不存在；既有 `vitest.mjs` 在載入設定前失敗：`module-runner.js` 檔案存在，但 Vite `realpath` 回 ENOENT。輸出在 `/tmp/vitest-r2-fix.out`。未安裝套件、未改 lockfile、未降低 strict。Vitest 測試本體未執行，不得標通過。
 - SQLite 探針不是 Cloudflare D1 runtime/transaction 實證；Vitest、Vite build、Wrangler Functions compile、瀏覽器互動、staging 與 CI 均未在本輪通過或執行，不能以第一輪 SHA 的 CI 當作本輪證據。
 - `db.batch` 的條件式 SQL 和唯一鍵已做靜態/SQLite 驗證；仍須在可正常執行的 Cloudflare Vitest/D1 相容環境做併發實證，尤其是兩個同時 conversion POST 的相同/不同 payload 分支。
 

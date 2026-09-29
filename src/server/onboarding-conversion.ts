@@ -1,6 +1,25 @@
 import { ApiError, json, parseJson, requiredString, uuid } from "./http";
 import type { ApiContext, AuthUser } from "./types";
 
+/** Real calendar date only. Date.parse accepts overflow such as 2026-02-30. */
+export function strictIsoDate(value: unknown, label: string): string {
+  const text = requiredString(value, label, 10);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!match) throw new ApiError(422, `${label}格式須為 YYYY-MM-DD。`);
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+  ) {
+    throw new ApiError(422, `${label}不是有效的日曆日期。`);
+  }
+  return text;
+}
+
 interface ConversionBody {
   employeeNo?: unknown; email?: unknown; department?: unknown; grade?: unknown;
   title?: unknown; jobTypeId?: unknown; hireDate?: unknown; salary?: unknown;
@@ -59,8 +78,7 @@ export async function convertHiredApplication(context: ApiContext, admin: AuthUs
   const grade = requiredString(body.grade, "職等", 100);
   const title = requiredString(body.title, "職務", 200);
   const jobTypeId = requiredString(body.jobTypeId, "職務類型", 100);
-  const hireDate = requiredString(body.hireDate, "到職日", 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(hireDate) || Number.isNaN(Date.parse(`${hireDate}T00:00:00Z`))) throw new ApiError(422, "到職日格式須為 YYYY-MM-DD。");
+  const hireDate = strictIsoDate(body.hireDate, "到職日");
   const salary = body.salary === null || body.salary === "" ? null : body.salary;
   if (salary !== null && (typeof salary !== "number" || !Number.isInteger(salary) || salary < 0 || salary > 100000000)) throw new ApiError(422, "薪資須為非負整數；不確定時請由 HR 確認。");
   const input = { employeeNo, email, department, grade, title, jobTypeId, hireDate, salary };
@@ -71,18 +89,22 @@ export async function convertHiredApplication(context: ApiContext, admin: AuthUs
   const before = await existingConversion(db, applicationId);
   if (before) {
     if (!sameConversion(before, input)) throw new ApiError(409, "此應徵已轉為員工，重送資料與既有員工主檔不一致。");
-    return json({ applicationId, employeeId: before.employeeId, status: "onboarded", alreadyConverted: true });
+    return json({ applicationId, employeeId: before.employeeId, status: "onboarded", alreadyConverted: true, legacyBackfill: false });
   }
 
   const employeeId = uuid();
   const historyId = uuid();
   const auditId = uuid();
+  const current = await db.prepare("SELECT status FROM candidate_applications WHERE id = ?").bind(applicationId).first<{ status: string }>();
+  const legacyBackfill = current?.status === "onboarded";
+  const legacyAudit = '{"employeeCreated":true,"legacyBackfill":true}';
+  const standardAudit = '{"employeeCreated":true}';
   const results = await db.batch([
     db.prepare(`INSERT INTO employees (id,employee_no,name,email,department,grade,title,job_type_id,hire_date,status,salary)
       SELECT ?, ?, c.name, ?, ?, ?, ?, ?, ?, 'active', ?
       FROM candidates c
       JOIN candidate_applications ca ON ca.candidate_id = c.id
-      WHERE ca.id = ? AND ca.status = 'hired'
+      WHERE ca.id = ? AND ca.status IN ('hired', 'onboarded')
         AND (c.email IS NULL OR lower(c.email) = lower(?))
         AND EXISTS (SELECT 1 FROM job_types jt WHERE jt.id = ? AND jt.active = 1)
         AND NOT EXISTS (
@@ -110,20 +132,20 @@ export async function convertHiredApplication(context: ApiContext, admin: AuthUs
         AND EXISTS (SELECT 1 FROM recruitment_employee_conversions WHERE application_id = ? AND employee_id = ?)`)
       .bind(applicationId, applicationId, employeeId),
     db.prepare(`INSERT INTO audit_logs(id,actor_user_id,action,entity_type,entity_id,details)
-      SELECT ?, ?, 'onboarding.convert', 'candidate_application', ?, '{"employeeCreated":true}'
+      SELECT ?, ?, 'onboarding.convert', 'candidate_application', ?, ?
       WHERE EXISTS (SELECT 1 FROM recruitment_employee_conversions WHERE application_id = ? AND employee_id = ?)`)
-      .bind(auditId, admin.id, applicationId, applicationId, employeeId),
+      .bind(auditId, admin.id, applicationId, legacyBackfill ? legacyAudit : standardAudit, applicationId, employeeId),
   ]);
   if (results[0]?.meta.changes === 1) {
-    return json({ applicationId, employeeId, status: "onboarded", alreadyConverted: false }, 201);
+    return json({ applicationId, employeeId, status: "onboarded", alreadyConverted: false, legacyBackfill }, 201);
   }
 
   // A competing successful batch is an idempotent retry; other predicate failures
   // deliberately remain a conflict and do not reveal another employee's details.
   const after = await existingConversion(db, applicationId);
   if (after && sameConversion(after, input)) {
-    return json({ applicationId, employeeId: after.employeeId, status: "onboarded", alreadyConverted: true });
+    return json({ applicationId, employeeId: after.employeeId, status: "onboarded", alreadyConverted: true, legacyBackfill: false });
   }
   if (after) throw new ApiError(409, "此應徵已由其他管理員轉為員工；請重新整理核對。");
-  throw new ApiError(409, "僅能轉換已錄取且已完成必填到職文件的應徵；員編與Email須未使用，職務類型須啟用。");
+  throw new ApiError(409, "僅能轉換已錄取或既有到職且已完成必填到職文件、尚未建立員工的應徵；員編與Email須未使用，職務類型須啟用。");
 }

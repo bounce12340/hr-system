@@ -29,7 +29,7 @@ const NEXT_STATUS: Record<PipelineStage, ApplicationStatus[]> = {
   interview: ["salary_approval", "rejected"],
   salary_approval: ["offer", "rejected"],
   offer: ["hired", "rejected"],
-  hired: ["onboarded", "rejected"],
+  hired: ["rejected"],
   onboarded: [],
 };
 
@@ -159,6 +159,7 @@ const APPLICATION_SELECT = `
          c.resume_url AS resumeUrl, c.notes AS candidateNotes,
          ca.job_opening_id AS jobOpeningId, jo.title AS jobTitle,
          jo.department, jo.status AS openingStatus, ca.status,
+         (SELECT c2.employee_id FROM recruitment_employee_conversions c2 WHERE c2.application_id = ca.id) AS employeeId,
          ca.applied_at AS appliedAt, ca.updated_at AS updatedAt
   FROM candidate_applications ca
   JOIN candidates c ON c.id = ca.candidate_id
@@ -532,18 +533,6 @@ async function assertTransitionRequirements(
       throw new ApiError(409, "候選人接受錄取通知後，才能標記為錄取。");
     }
   }
-  if (application.status === "hired" && target === "onboarded") {
-    const missing = await db.prepare(`
-      SELECT COUNT(*) AS count
-      FROM onboarding_items oi
-      LEFT JOIN application_onboarding_checklist aoc
-        ON aoc.onboarding_item_id = oi.id AND aoc.application_id = ?
-      WHERE oi.active = 1 AND oi.required = 1 AND COALESCE(aoc.completed, 0) = 0
-    `).bind(application.id).first<{ count: number }>();
-    if ((missing?.count ?? 0) > 0) {
-      throw new ApiError(409, "必填到職文件尚未全部完成，無法標記到職。");
-    }
-  }
 }
 
 async function transitionApplication(
@@ -553,6 +542,9 @@ async function transitionApplication(
 ): Promise<Response> {
   const body = await parseJson<TransitionInput>(context.request);
   const target = applicationStatus(body.status);
+  if (target === "onboarded") {
+    throw new ApiError(409, "到職必須使用「確認到職並建立員工」。既有到職但尚未建立員工者，請使用同一確認流程補建，不可由此直接變更階段。");
+  }
   const note = optionalString(body.note, "狀態備註", 2000);
   const application = await applicationById(context.env.DB, id);
   if (application.status === "rejected" || application.status === "onboarded") {
