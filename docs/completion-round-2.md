@@ -83,7 +83,7 @@
 
 同次另跑：`python3 scripts/verify-completion-round-2-fix-sqlite.py` 4 項 exit 0；`python3 scripts/verify-completion-round-2-sqlite.py` 7 項 exit 0；`python3 scripts/verify-consistency-sqlite.py` 5 項 exit 0；`git diff --check` exit 0。fix 探針的 SQL 由 `onboarding-conversion.ts` 的 batch 原文擷取，含 hired 正常、batch 前 `hired → onboarded`、batch 前 `onboarded → hired`。這只證明隔離 SQLite 依序可見時 CASE 與列數符合預期，**不是** Cloudflare D1 batch，也**不是** Vitest。新增的兩支回歸案例尚未執行。
 
-## 驗證限制與剩餘風險
+在 CI run `36556876980` 兩個 Node job 各 245 pass、1 fail，失敗定位為測試 fixture：相同 payload 競態注入的員編 `RACE-EMP` 與 request body 員編不同，並非產品 `sameConversion` 冪等邏輯缺陷；一般 email 佔用案例原先候選人 email 也未與 request 一致，未形成唯一衝突條件。本輪修復將注入資料的比對欄位綁定 body，讓 email 佔用案例建立同候選人 email（大小寫差異），並把 same/different/conflict race 拆成獨立 `it`，保留原有 200/409、alreadyConverted、same employeeId 與 no-extra counts 斷言。此段為測試 fixture 修復來源，不將 source inspection 當 Vitest 證據。
 
 - `429637a` 再執行一次 `node node_modules/vitest/vitest.mjs run test/completion-round-2.test.ts` 為 exit 1。`node_modules/.bin/vitest` 不存在；既有 `vitest.mjs` 在載入設定前失敗：`module-runner.js` 檔案存在，但 Vite `realpath` 回 ENOENT。輸出在 `/tmp/vitest-r2-fix.out`。未安裝套件、未改 lockfile、未降低 strict。Vitest 測試本體未執行，不得標通過。後續稽核修正**不重跑** Vitest。
 - SQLite 探針不是 Cloudflare D1 runtime/transaction 實證；Vitest、Vite build、Wrangler Functions compile、瀏覽器互動、staging 與 CI 均未在本輪通過或執行，不能以第一輪 SHA 的 CI 當作本輪證據。

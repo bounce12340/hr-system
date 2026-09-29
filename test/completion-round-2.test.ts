@@ -175,18 +175,19 @@ describe("第二輪到職轉換安全回歸", () => {
     expect((await call(`/api/admin/recruitment/applications/${numberConflict.applicationId}/convert-employee`, request("POST", adminCookie, conversionBody(numberConflict.jobTypeId, numberConflict.email, "no", { employeeNo: "R2-CONFLICT" })))).response.status).toBe(409);
     const emailConflict = await hiredApplication("email衝突");
     await completeChecklist(emailConflict.applicationId);
-    expect((await call(`/api/admin/recruitment/applications/${emailConflict.applicationId}/convert-employee`, request("POST", adminCookie, conversionBody(emailConflict.jobTypeId, "OTHER-CONFLICT@example.com", "mail")))).response.status).toBe(409);
+    await env.DB.prepare("INSERT INTO employees (id,employee_no,name,email,department,grade,title,job_type_id,hire_date,status) VALUES ('conflict-email','R2-CONFLICT-EMAIL','衝突',?,'人資行政部','G1','衝突','jt-office','2020-01-01','active')").bind(emailConflict.email.toUpperCase()).run();
+    expect((await call(`/api/admin/recruitment/applications/${emailConflict.applicationId}/convert-employee`, request("POST", adminCookie, conversionBody(emailConflict.jobTypeId, emailConflict.email, "mail")))).response.status).toBe(409);
     expect(await counts(numberConflict.applicationId)).toEqual({ employees: 0, history: 0, audit: 0, conversions: 0 });
     expect(await counts(emailConflict.applicationId)).toEqual({ employees: 0, history: 0, audit: 0, conversions: 0 });
-    await env.DB.prepare("DELETE FROM employees WHERE id = 'conflict-no'").run();
+    await env.DB.prepare("DELETE FROM employees WHERE id IN ('conflict-no','conflict-email')").run();
   });
 
-  it("預讀後寫入競爭時相同 payload 冪等、不同 payload 與既有衝突都不留半套", async () => {
+  it("預讀後寫入競爭時相同 payload 冪等且不留半套", async () => {
     const { applicationId, jobTypeId, email } = await hiredApplication("競態");
     await completeChecklist(applicationId);
     const body = conversionBody(jobTypeId, email, "race");
     const same = await withConcurrentWrite(`/api/admin/recruitment/applications/${applicationId}/convert-employee`, adminCookie, body, async () => {
-      await env.DB.prepare(`INSERT INTO employees (id,employee_no,name,email,department,grade,title,job_type_id,hire_date,status,salary) VALUES (?, 'RACE-EMP', '候選人 競態', ?, '測試部', 'G1', '測試職務', ?, '2026-09-28', 'active', NULL)`).bind("race-emp", email, jobTypeId).run();
+      await env.DB.prepare("INSERT INTO employees (id,employee_no,name,email,department,grade,title,job_type_id,hire_date,status,salary) VALUES (?, ?, '候選人 競態', ?, '測試部', 'G1', '測試職務', ?, '2026-09-28', 'active', NULL)").bind("race-emp", body.employeeNo, body.email, body.jobTypeId).run();
       await env.DB.prepare("INSERT INTO recruitment_employee_conversions(application_id,employee_id,created_by) VALUES (?, 'race-emp', 'usr-admin')").bind(applicationId).run();
       await env.DB.prepare("UPDATE candidate_applications SET status = 'onboarded' WHERE id = ?").bind(applicationId).run();
     });
@@ -194,7 +195,9 @@ describe("第二輪到職轉換安全回歸", () => {
     expect(same.body.data?.alreadyConverted).toBe(true);
     expect(same.body.data?.employeeId).toBe("race-emp");
     expect(await counts(applicationId)).toEqual({ employees: 1, history: 0, audit: 0, conversions: 1 });
+  });
 
+  it("預讀後寫入競爭時不同 payload 不留半套", async () => {
     const other = await hiredApplication("競態不同");
     await completeChecklist(other.applicationId);
     const otherBody = conversionBody(other.jobTypeId, other.email, "race2");
@@ -204,7 +207,9 @@ describe("第二輪到職轉換安全回歸", () => {
     });
     expect(different.response.status).toBe(409);
     expect(await counts(other.applicationId)).toEqual({ employees: 1, history: 0, audit: 0, conversions: 1 });
+  });
 
+  it("預讀後寫入競爭時員編與 email 衝突不留半套", async () => {
     const third = await hiredApplication("員編衝突");
     await completeChecklist(third.applicationId);
     const thirdBody = conversionBody(third.jobTypeId, third.email, "race3", { employeeNo: "RACE-DUP" });
