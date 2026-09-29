@@ -1,5 +1,6 @@
 import { handleAdminAccounts } from "./accounts";
 import { authenticate, changePassword, completeTour, login, logout } from "./auth";
+import { listDataQuality } from "./data-quality";
 import { handleAdminHealthCheck, handleEmployeeHealthCheck } from "./health";
 import {
   ApiError,
@@ -82,6 +83,12 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     }
     if (path.startsWith("/api/admin/")) {
       requireAdmin(user);
+      if (path === "/api/admin/data-quality" && request.method === "GET") {
+        return listDataQuality(context);
+      }
+      if (path === "/api/admin/data-quality") {
+        throw new ApiError(405, "此端點只接受讀取。");
+      }
       // 帳號管理放最前面：/api/admin/users 與 /api/admin/employees/{id}/responsibilities
       // 都不與其他模組的路徑重疊，先比對可省掉後面五個模組的 match。
       const accountsResponse = await handleAdminAccounts(context, path);
