@@ -75,3 +75,13 @@ Employee 端點只用 session `employeeId`，SQL `employee_id = ?`。不讀 quer
 
 `M6AdminPages.tsx` 只加 `initialSection`，預設仍是 `due`。健檢名單、紀錄與政策都沒改。tsconfig 只把 `src/shared`（test 另含 `src/client` 以便 SSR）納入既有 include，沒有降 `strict`、沒有 skip。
 
+### 測試建置修正
+
+獨立安全審查確認 `test/role-workbench.test.ts` 含 JSX，TypeScript 以 `.ts` 解析會在約第 228 行報 `TS1005`。授權矩陣測試因此無法進入斷言。已改名 `test/role-workbench.test.tsx`，未改斷言或產品邏輯。
+
+以目前工作樹複製到 `/tmp/hr-wb-tsc2`（`node_modules` 僅 symlink 主 repo）執行：
+
+`node node_modules/typescript/bin/tsc -p tsconfig.test.json --noEmit` → exit 0。
+
+這只證明測試檔可被 test tsconfig 解析，不是 Vitest／D1／瀏覽器通過。Vitest 仍受既有 `module-runner.js` realpath ENOENT 阻擋，未重跑。文件末尾多餘空行亦一併移除。
+
