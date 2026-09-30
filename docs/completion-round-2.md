@@ -1,5 +1,17 @@
 # 第二輪本機補完紀錄
 
+## 最新驗證狀態（2026-09-29）
+
+本節優先於下方歷史交付敘述；其餘段落保留各階段證據，不代表現行版本仍處於該狀態。
+
+- 產品及測試基準：`2045e79c8dea454bd3d19807bd61db0d24706a5f`，`improve/completion-round-2`。此版本已於先前授權下推送；本次文件更新不推送、不觸發 workflow。
+- 正式 CI：[36560046826](https://github.com/bounce12340/hr-system/actions/runs/36560046826)，精確對應上述 SHA，completed/success。Node 22.23.2 與 24.21.0 日誌各確認 **26 檔、248 tests passed**；npm ci、四組 typecheck、Vitest、Vite build、Pages Functions compile 全通過。
+- 舊 run `36556876980@0a09721` 仍為 failure，已被上述新版本成功 run 取代，並非重跑後改寫歷史。
+- 獨立驗證報告：repo 外 `/var/minis/workspace/hr-round2-final-review/validation.md`。重驗四組 typecheck、三支 SQLite 探針（5/7/4）及 diff check 通過；第一次未取得完成碼的嘗試不採認。本機 Vitest 仍在啟動前因 module-runner realpath ENOENT 阻擋，不能稱本機正式測試通過。
+- 下方「未 push」「案例未執行」「CI/build 未通過」均指當時歷史階段，不適用於上述產品 SHA 的正式 CI。CI 不證明瀏覽器、遠端 D1 或 staging 已驗收。
+- 本次僅更新文件；若文件形成新 commit，上述 CI 仍只屬 `2045e79`，不宣稱新文件 commit 已跑 CI。
+- 剩餘上線閘門：瀏覽器互動、備份還原、staging 與 migration 預檢/驗證。通知仍只有 count-only dry-run；收件人、事件、排程、未知送達處理與帳號邀請政策待明確決策，不自行啟用。
+
 ## 範圍與授權
 
 - 工作樹：`/var/minis/workspace/hr-system`；分支 `improve/completion-round-2`；接手基準 HEAD `595bc86b4e0704db0110fc2d2a2d56296b21aea5`。接手時已存在未提交草稿，已逐檔審查後以最小修正保留並完成，沒有 reset、clean、stash 或覆蓋他人變更。
