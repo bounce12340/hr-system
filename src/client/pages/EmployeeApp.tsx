@@ -16,6 +16,9 @@ interface EmployeeAppProps { user: User; onLogout: () => void }
 
 export function EmployeeApp({ user, onLogout }: EmployeeAppProps) {
   const [tab, setTab] = useState<EmployeeTab>("home");
+  function openWorkbenchTarget(target: "schedule" | "certifications") {
+    setTab(target);
+  }
   const tour = useOnboardingTour(user.tourCompleted);
   const tabs: Array<{ id: EmployeeTab; label: string }> = [{ id: "home", label: "首頁" }, { id: "schedule", label: "我的課表" }, { id: "enroll", label: "課程報名" }, { id: "records", label: "我的訓練紀錄" }, { id: "certifications", label: "我的證照" }, { id: "healthChecks", label: "我的健檢" }, { id: "idp", label: "我的 IDP" }, { id: "profile", label: "個人資料" }, { id: "help", label: "使用說明" }];
 
@@ -62,7 +65,7 @@ export function EmployeeApp({ user, onLogout }: EmployeeAppProps) {
     <GuidedTour steps={tourSteps} open={tour.open} onClose={() => { tour.close(); setTab("home"); }} />
     <header class="employee-header"><div class="sidebar-brand"><span>HR</span><strong>HR Learning</strong></div><nav>{tabs.map((item) => <button class={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)} data-tour={`nav-${item.id}`} key={item.id}>{item.label}</button>)}</nav><div><strong>{user.employeeName}</strong><small>{user.department}</small><button class="text-button" onClick={onLogout}>登出</button></div></header>
     <main class="employee-workspace">
-      {tab === "home" && <EmployeeHome user={user} />}
+      {tab === "home" && <EmployeeHome user={user} onOpenTarget={openWorkbenchTarget} />}
       {tab === "schedule" && <MySchedule />}
       {tab === "enroll" && <CourseEnrollment />}
       {tab === "records" && <MyRecords />}

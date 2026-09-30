@@ -12,6 +12,7 @@ import {
 } from "./http";
 import { handleAdminM1, handleEmployeeM1 } from "./m1";
 import { handleAdminM2, handleEmployeeM2 } from "./m2";
+import { handleAdminWorkbench, handleEmployeeWorkbench } from "./workbench";
 import { handleAdminM3 } from "./m3";
 import { handleReminderNotifications } from "./reminder-notifications";
 import { handleAdminM4 } from "./m4";
@@ -93,6 +94,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       // 都不與其他模組的路徑重疊，先比對可省掉後面五個模組的 match。
       const accountsResponse = await handleAdminAccounts(context, path);
       if (accountsResponse) return accountsResponse;
+      const workbenchResponse = await handleAdminWorkbench(context, path);
+      if (workbenchResponse) return workbenchResponse;
       const response = await handleAdminM1(context, path);
       if (response) return response;
       const m2Response = await handleAdminM2(context, path);
@@ -111,6 +114,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       if (settingsResponse) return settingsResponse;
     }
     if (path.startsWith("/api/employee/")) {
+      const workbenchResponse = await handleEmployeeWorkbench(context, path);
+      if (workbenchResponse) return workbenchResponse;
       const response = await handleEmployeeM1(context, path);
       if (response) return response;
       const m2Response = await handleEmployeeM2(context, path);

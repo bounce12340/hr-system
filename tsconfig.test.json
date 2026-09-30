@@ -13,6 +13,8 @@
   "include": [
     "worker-configuration.d.ts",
     "src/server",
+    "src/shared",
+    "src/client",
     "test"
   ]
 }
