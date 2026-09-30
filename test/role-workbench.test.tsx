@@ -225,7 +225,7 @@ describe("工作台 UI 狀態", () => {
   });
 
   it("SSR 初始狀態是讀取中，不用空陣列假裝成功", () => {
-    const html = render(<RoleWorkbench endpoint="/api/admin/workbench" onOpenTarget={() => undefined} />);
+    const html = render(<RoleWorkbench endpoint="/api/admin/workbench" allowedTargets={["recruitment/onboarding"]} onOpenTarget={() => undefined} />);
     expect(html).toContain("工作台讀取中");
     expect(html).not.toContain("目前沒有工作台待辦。");
   });

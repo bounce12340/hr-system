@@ -43,8 +43,9 @@ const ALLOWED_TARGETS = new Set<WorkbenchTarget>([
   "certifications",
 ]);
 
-export function RoleWorkbench<T extends WorkbenchTarget>({ endpoint, onOpenTarget }: {
+export function RoleWorkbench<T extends WorkbenchTarget>({ endpoint, allowedTargets, onOpenTarget }: {
   endpoint: "/api/admin/workbench" | "/api/employee/workbench";
+  allowedTargets: readonly T[];
   onOpenTarget: (target: T) => void;
 }) {
   const [payload, setPayload] = useState<WorkbenchPayload | null>(null);
@@ -131,8 +132,11 @@ export function RoleWorkbench<T extends WorkbenchTarget>({ endpoint, onOpenTarge
                         <p>{item.reason}</p>
                         <small>期限：{item.dueDate ?? "未設定"}・{item.nextAction}</small>
                       </div>
-                      {ALLOWED_TARGETS.has(item.target) ? (
-                        <button type="button" class="secondary" onClick={() => onOpenTarget(item.target)}>
+                      {allowedTargets.includes(item.target as T) ? (
+                        <button type="button" class="secondary" onClick={() => {
+                          const target = allowedTargets.find((candidate) => candidate === item.target);
+                          if (target) onOpenTarget(target);
+                        }}>
                           前往
                         </button>
                       ) : (
