@@ -43,9 +43,9 @@ const ALLOWED_TARGETS = new Set<WorkbenchTarget>([
   "certifications",
 ]);
 
-export function RoleWorkbench({ endpoint, onOpenTarget }: {
+export function RoleWorkbench<T extends WorkbenchTarget>({ endpoint, onOpenTarget }: {
   endpoint: "/api/admin/workbench" | "/api/employee/workbench";
-  onOpenTarget: (target: WorkbenchTarget) => void;
+  onOpenTarget: (target: T) => void;
 }) {
   const [payload, setPayload] = useState<WorkbenchPayload | null>(null);
   const [error, setError] = useState("");
