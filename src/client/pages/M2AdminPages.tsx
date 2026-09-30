@@ -7,6 +7,7 @@ import type {
   CertificationReminder,
   CertificationType,
   CourseSession,
+  DataQualityItem,
   EmployeeCertification,
   HealthCheckDueEntry,
   MandatoryTrainingEmployee,
@@ -57,6 +58,7 @@ export function AdminDashboard() {
       <div class="metric"><span>測驗需補訓</span><strong>{data?.retrainingRequiredCount ?? 0}</strong></div>
       <div class="metric"><span>未完成必修</span><strong>{data?.missingMandatoryCount ?? 0}</strong></div>
     </div>
+    <DataQualityGaps />
     <div class="panel">
       <div class="panel-heading"><div><h2>證照到期提醒</h2><small>提前 {data?.settings.certificationReminderDays ?? 60} 天顯示</small></div></div>
       <CertificationReminderList
@@ -93,6 +95,81 @@ export function AdminDashboard() {
       </div>
     </div>
   </section>;
+}
+
+const GAP_FIELD_LABEL: Record<DataQualityItem["field"], string> = {
+  birth_date: "出生日期",
+  department: "部門",
+  employee_id: "員工連結",
+};
+
+const GAP_TAB_LABEL: Record<DataQualityItem["nextAction"]["tab"], string> = {
+  employees: "員工管理",
+  settings: "系統設定",
+};
+
+function DataQualityGaps() {
+  const [items, setItems] = useState<DataQualityItem[] | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  function load() {
+    setLoading(true);
+    setError("");
+    void api<{ counts: { total: number }; items: DataQualityItem[] }>("/api/admin/data-quality")
+      .then((data) => {
+        setItems(data.items);
+        setLoading(false);
+      })
+      .catch((caught: unknown) => {
+        setItems(null);
+        setError(caught instanceof Error ? caught.message : "讀取失敗。");
+        setLoading(false);
+      });
+  }
+
+  useEffect(() => { load(); }, []);
+
+  return (
+    <div class="panel section-title" aria-busy={loading}>
+      <div class="panel-heading">
+        <div>
+          <h2>資料待補</h2>
+          <small>只列目前規則算不出的缺口，不是逾期。</small>
+        </div>
+        {!loading && <button type="button" class="secondary" onClick={load}>重新整理</button>}
+      </div>
+      {loading && <div class="empty-state">資料待補清單載入中。</div>}
+      {!loading && error && (
+        <div class="alert error" role="alert">
+          {error}
+          <div class="button-row">
+            <button type="button" class="secondary" onClick={load}>重試</button>
+          </div>
+        </div>
+      )}
+      {!loading && !error && items?.length === 0 && <div class="empty-state">目前沒有待補。</div>}
+      {!loading && !error && items && items.length > 0 && (
+        <div class="table-card">
+          <table>
+            <thead>
+              <tr><th>欄位</th><th>原因</th><th>影響</th><th>下一步</th></tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id}>
+                  <td>{GAP_FIELD_LABEL[item.field]}</td>
+                  <td>{item.reason}</td>
+                  <td>{item.impact}</td>
+                  <td>{GAP_TAB_LABEL[item.nextAction.tab]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function MandatoryTrainingPage() {
