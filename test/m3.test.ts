@@ -472,11 +472,27 @@ describe("M3 驗收項目 8：投遞到到職與漏斗", () => {
         .every((item) => item.completed === 1 && item.completedAt),
     ).toBe(true);
 
-    const onboarded = await call(
+    const blocked = await call(
       `/api/admin/recruitment/applications/${applicationId}/transition`,
       adminJson("POST", { status: "onboarded", note: "2026-08-17 正式到職" }),
     );
-    expect(onboarded.response.status).toBe(200);
+    expect(blocked.response.status).toBe(409);
+    const onboarded = await call<{ employeeId: string; alreadyConverted: boolean }>(
+      `/api/admin/recruitment/applications/${applicationId}/convert-employee`,
+      adminJson("POST", {
+        employeeNo: `M3-${crypto.randomUUID().slice(0, 8)}`,
+        email: "journey@example.com",
+        department: "營運部",
+        grade: "G1",
+        title: "全流程職務",
+        jobTypeId: "jt-office",
+        hireDate: "2026-08-17",
+        salary: 71000,
+        confirmed: true,
+      }),
+    );
+    expect(onboarded.response.status).toBe(201);
+    expect(onboarded.body.data?.alreadyConverted).toBe(false);
     stats = await funnel();
     expect(count(stats, "hired", "currentCount")).toBe(
       count(baseline, "hired", "currentCount"),

@@ -7,6 +7,7 @@ import {
   requiredString,
   uuid,
 } from "./http";
+import { convertHiredApplication } from "./onboarding-conversion";
 import type { ApiContext, AuthUser } from "./types";
 
 const PIPELINE_STAGES = [
@@ -28,7 +29,7 @@ const NEXT_STATUS: Record<PipelineStage, ApplicationStatus[]> = {
   interview: ["salary_approval", "rejected"],
   salary_approval: ["offer", "rejected"],
   offer: ["hired", "rejected"],
-  hired: ["onboarded", "rejected"],
+  hired: ["rejected"],
   onboarded: [],
 };
 
@@ -158,6 +159,7 @@ const APPLICATION_SELECT = `
          c.resume_url AS resumeUrl, c.notes AS candidateNotes,
          ca.job_opening_id AS jobOpeningId, jo.title AS jobTitle,
          jo.department, jo.status AS openingStatus, ca.status,
+         (SELECT c2.employee_id FROM recruitment_employee_conversions c2 WHERE c2.application_id = ca.id) AS employeeId,
          ca.applied_at AS appliedAt, ca.updated_at AS updatedAt
   FROM candidate_applications ca
   JOIN candidates c ON c.id = ca.candidate_id
@@ -531,18 +533,6 @@ async function assertTransitionRequirements(
       throw new ApiError(409, "候選人接受錄取通知後，才能標記為錄取。");
     }
   }
-  if (application.status === "hired" && target === "onboarded") {
-    const missing = await db.prepare(`
-      SELECT COUNT(*) AS count
-      FROM onboarding_items oi
-      LEFT JOIN application_onboarding_checklist aoc
-        ON aoc.onboarding_item_id = oi.id AND aoc.application_id = ?
-      WHERE oi.active = 1 AND oi.required = 1 AND COALESCE(aoc.completed, 0) = 0
-    `).bind(application.id).first<{ count: number }>();
-    if ((missing?.count ?? 0) > 0) {
-      throw new ApiError(409, "必填到職文件尚未全部完成，無法標記到職。");
-    }
-  }
 }
 
 async function transitionApplication(
@@ -552,6 +542,9 @@ async function transitionApplication(
 ): Promise<Response> {
   const body = await parseJson<TransitionInput>(context.request);
   const target = applicationStatus(body.status);
+  if (target === "onboarded") {
+    throw new ApiError(409, "到職必須使用「確認到職並建立員工」。既有到職但尚未建立員工者，請使用同一確認流程補建，不可由此直接變更階段。");
+  }
   const note = optionalString(body.note, "狀態備註", 2000);
   const application = await applicationById(context.env.DB, id);
   if (application.status === "rejected" || application.status === "onboarded") {
@@ -564,18 +557,29 @@ async function transitionApplication(
     );
   }
   await assertTransitionRequirements(context.env.DB, application, target);
-  await context.env.DB.batch([
+  const results = await context.env.DB.batch([
+    // The history row is inserted only if the status observed before validation is
+    // still current when this atomic batch begins. This prevents a stale read from
+    // recording a transition that the conditional UPDATE cannot perform.
+    context.env.DB.prepare(`
+      INSERT INTO candidate_application_status_history (
+        id, application_id, from_status, to_status, changed_by, note
+      )
+      SELECT ?, id, status, ?, ?, ?
+      FROM candidate_applications
+      WHERE id = ? AND status = ?
+    `).bind(uuid(), target, admin.id, note, id, application.status),
     context.env.DB.prepare(`
       UPDATE candidate_applications
       SET status = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE id = ? AND status = ?
     `).bind(target, id, application.status),
-    context.env.DB.prepare(`
-      INSERT INTO candidate_application_status_history (
-        id, application_id, from_status, to_status, changed_by, note
-      ) VALUES (?, ?, ?, ?, ?, ?)
-    `).bind(uuid(), id, application.status, target, admin.id, note),
   ]);
+  // Inspect the INSERT's own affected-row count, not changes() in a later
+  // statement: D1 batch transactions do not promise that cross-statement state.
+  if (results[0]?.meta.changes !== 1) {
+    throw new ApiError(409, "應徵階段已由其他操作更新，請重新整理後再試。");
+  }
   return json({ id, fromStatus: application.status, status: target });
 }
 
@@ -1325,6 +1329,11 @@ export async function handleAdminM3(
   if (applicationMatch?.[1] && context.request.method === "DELETE") {
     return deleteApplication(context, applicationMatch[1]);
   }
+  const conversionMatch = path.match(/^\/api\/admin\/recruitment\/applications\/([^/]+)\/convert-employee$/);
+  if (conversionMatch?.[1] && context.request.method === "POST") {
+    return convertHiredApplication(context, admin, conversionMatch[1]);
+  }
+
   if (path === `${base}/funnel` && context.request.method === "GET") {
     return funnelStats(context);
   }

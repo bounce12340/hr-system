@@ -74,6 +74,23 @@ interface AdminAppProps {
 
 export function AdminApp({ user, onLogout }: AdminAppProps) {
   const [tab, setTab] = useState<AdminTab>("dashboard");
+  const [schedulingSection, setSchedulingSection] = useState<SchedulingSection>("calendar");
+  const [recruitmentSection, setRecruitmentSection] = useState<"pipeline" | "onboarding">("pipeline");
+  const [healthSection, setHealthSection] = useState<"due" | "certifications">("due");
+  function openWorkbenchTarget(target: "recruitment/onboarding" | "scheduling/attendance" | "health/certifications") {
+    if (target === "recruitment/onboarding") {
+      setRecruitmentSection("onboarding");
+      setTab("recruitment");
+      return;
+    }
+    if (target === "scheduling/attendance") {
+      setSchedulingSection("attendance");
+      setTab("scheduling");
+      return;
+    }
+    setHealthSection("certifications");
+    setTab("health");
+  }
   const tour = useOnboardingTour(user.tourCompleted);
   const tabs: Array<{ id: AdminTab; label: string }> = [
     { id: "dashboard", label: "管理儀表板" },
@@ -189,13 +206,13 @@ export function AdminApp({ user, onLogout }: AdminAppProps) {
             <button class="text-button" onClick={onLogout}>登出</button>
           </div>
         </header>
-        {tab === "dashboard" && <AdminDashboard />}
+        {tab === "dashboard" && <AdminDashboard onOpenTarget={openWorkbenchTarget} />}
         {tab === "employees" && <EmployeeManagementPage />}
-        {tab === "scheduling" && <SchedulingGroupPage />}
+        {tab === "scheduling" && <SchedulingGroupPage initialSection={schedulingSection} />}
         {tab === "training" && <TrainingGroupPage />}
-        {tab === "health" && <HealthAndCertificationsPage />}
+        {tab === "health" && <HealthAndCertificationsPage initialSection={healthSection} />}
         {tab === "attendance-management" && <AttendanceManagementPage />}
-        {tab === "recruitment" && <RecruitmentPage />}
+        {tab === "recruitment" && <RecruitmentPage initialSection={recruitmentSection} />}
         {tab === "reports" && <ReportsPage />}
         {tab === "talent" && <TalentManagementPage />}
         {tab === "settings" && <SystemSettingsPage />}
@@ -233,8 +250,10 @@ function GroupNav<T extends string>({ sections, current, onChange, label }: {
  * 排課：開課到結案的同一條作業流。重要日子（封鎖日／全員必訓日）也放這裡——
  * 它存在的目的就是約束排課，脫離排課情境沒有意義。
  */
-function SchedulingGroupPage() {
-  const [section, setSection] = useState<SchedulingSection>("calendar");
+function SchedulingGroupPage({ initialSection = "calendar" }: {
+  initialSection?: SchedulingSection;
+}) {
+  const [section, setSection] = useState<SchedulingSection>(initialSection);
   return (
     <>
       <GroupNav

@@ -46,6 +46,7 @@ interface Application {
   department: string;
   openingStatus: string;
   status: ApplicationStatus;
+  employeeId: string | null;
   appliedAt: string;
   updatedAt: string;
 }
@@ -85,7 +86,6 @@ const NEXT_STAGE: Partial<Record<ApplicationStatus, ApplicationStatus>> = {
   interview: "salary_approval",
   salary_approval: "offer",
   offer: "hired",
-  hired: "onboarded",
 };
 
 const todayDate = () => new Date().toISOString().slice(0, 10);
@@ -106,8 +106,10 @@ function StatusBadge({ status }: { status: ApplicationStatus | string }) {
   );
 }
 
-export function RecruitmentPage() {
-  const [section, setSection] = useState<RecruitmentSection>("pipeline");
+export function RecruitmentPage({ initialSection = "pipeline" }: {
+  initialSection?: RecruitmentSection;
+} = {}) {
+  const [section, setSection] = useState<RecruitmentSection>(initialSection);
   const sections: Array<{ id: RecruitmentSection; label: string }> = [
     { id: "pipeline", label: "招募漏斗" },
     { id: "openings", label: "職缺" },
@@ -154,21 +156,75 @@ function PipelinePage() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [conversion, setConversion] = useState<{ id: string; employeeNo: string; department: string; grade: string; title: string; jobTypeId: string; hireDate: string; salary: string; legacy: boolean } | null>(null);
+  const [jobTypes, setJobTypes] = useState<Array<{id:string;name:string}>>([]);
 
   async function load() {
     try {
-      const [funnel, applicationData] = await Promise.all([
+      const [funnel, applicationData, matrix] = await Promise.all([
         api<{ stages: FunnelStage[] }>("/api/admin/recruitment/funnel"),
         api<{ applications: Application[] }>("/api/admin/recruitment/applications"),
+        api<{ jobTypes: Array<{id:string;name:string}> }>("/api/admin/training-matrix"),
       ]);
       setStages(funnel.stages);
       setApplications(applicationData.applications);
+      setJobTypes(matrix.jobTypes);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "無法讀取招募漏斗。");
     }
   }
 
   useEffect(() => { void load(); }, []);
+
+  async function beginConversion(application: Application) {
+    setError("");
+    try {
+      const [salary, checklist] = await Promise.all([
+        api<{ salaryApprovals: Array<{ applicationId: string; approvedSalary: number | null }> }>("/api/admin/recruitment/salary-approvals"),
+        api<{ items: Array<{ required: number; completed: number }> }>(`/api/admin/recruitment/applications/${application.id}/onboarding-checklist`),
+      ]);
+      if (checklist.items.some((item) => item.required === 1 && item.completed !== 1)) {
+        setError("必填到職文件尚未全部完成；完成後才能建立員工主檔。");
+        return;
+      }
+      setConversion({
+        id: application.id,
+        employeeNo: "",
+        department: application.department,
+        grade: "",
+        title: application.jobTitle,
+        jobTypeId: "",
+        hireDate: todayDate(),
+        salary: salary.salaryApprovals.find((item) => item.applicationId === application.id)?.approvedSalary?.toString() ?? "",
+        legacy: application.status === "onboarded",
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "無法讀取到職確認資料。");
+    }
+  }
+
+  function cancelConversion() {
+    if (!conversion) return;
+    const dirty = conversion.employeeNo !== "" || conversion.grade !== "" || conversion.jobTypeId !== "" || conversion.title !== applications.find((item) => item.id === conversion.id)?.jobTitle || conversion.department !== applications.find((item) => item.id === conversion.id)?.department;
+    if (dirty && !window.confirm("已填寫的到職確認尚未送出，確定取消並保留稍後再補？")) return;
+    setConversion(null);
+  }
+
+  async function convert(event: Event) {
+    event.preventDefault();
+    if (!conversion) return;
+    setError("");
+    try {
+      const result = await api<{ alreadyConverted: boolean; legacyBackfill?: boolean }>(`/api/admin/recruitment/applications/${conversion.id}/convert-employee`, { method:"POST", ...jsonBody({ employeeNo:conversion.employeeNo,email:applications.find((a)=>a.id===conversion.id)?.candidateEmail,department:conversion.department,grade:conversion.grade,title:conversion.title,jobTypeId:conversion.jobTypeId,hireDate:conversion.hireDate,salary:conversion.salary===""?null:Number(conversion.salary),confirmed:true }) });
+      setMessage(result.alreadyConverted
+        ? "此應徵已建立員工，未重複新增歷程或帳號。"
+        : result.legacyBackfill
+          ? "已為既有到職補建員工主檔；原到職歷程未改寫，且未建立登入帳號。"
+          : "已建立員工並記錄到職；登入帳號需沿用既有帳號管理流程建立。");
+      setConversion(null);
+      await load();
+    } catch(caught) { setError(caught instanceof Error?caught.message:"無法完成到職轉換。"); }
+  }
 
   async function transition(application: Application, status: ApplicationStatus) {
     setError("");
@@ -188,6 +244,7 @@ function PipelinePage() {
   return (
     <>
       <Message text={message} /><Message text={error} error />
+      {conversion && <form class="panel" onSubmit={(event)=>void convert(event)}><h2>{conversion.legacy ? "補建既有到職員工" : "確認到職並建立員工"}：{applications.find((a)=>a.id===conversion.id)?.candidateName}</h2><p>{conversion.legacy ? "此應徵已是到職但尚未建立員工。確認後只補建主檔與稽核，不改寫原到職歷程，也不建立登入帳號。" : "請由 HR 核對所有欄位。系統不建立登入帳號、不推定職等或薪資。"}</p><label>員工編號<input required value={conversion.employeeNo} onInput={e=>setConversion({...conversion,employeeNo:e.currentTarget.value})}/></label><label>候選人 Email（核對）<input readOnly value={applications.find((a)=>a.id===conversion.id)?.candidateEmail??""}/></label><label>部門<input required value={conversion.department} onInput={e=>setConversion({...conversion,department:e.currentTarget.value})}/></label><label>職等<input required value={conversion.grade} onInput={e=>setConversion({...conversion,grade:e.currentTarget.value})}/></label><label>職務<input required value={conversion.title} onInput={e=>setConversion({...conversion,title:e.currentTarget.value})}/></label><label>職務類型<select required value={conversion.jobTypeId} onChange={e=>setConversion({...conversion,jobTypeId:e.currentTarget.value})}><option value="">請確認</option>{jobTypes.map(t=><option value={t.id}>{t.name}</option>)}</select></label><label>到職日<input type="date" required value={conversion.hireDate} onInput={e=>setConversion({...conversion,hireDate:e.currentTarget.value})}/></label><label>薪資（核對後填寫；未知可留空）<input type="number" min="0" value={conversion.salary} onInput={e=>setConversion({...conversion,salary:e.currentTarget.value})}/></label><button class="primary" type="submit">{conversion.legacy ? "我已核對，補建員工主檔" : "我已核對，建立員工並標記到職"}</button><button type="button" onClick={cancelConversion}>取消</button></form>}
       <div class="funnel-grid">
         {stages.map((stage, index) => (
           <article class="funnel-card">
@@ -210,6 +267,8 @@ function PipelinePage() {
                   <td>{new Date(application.updatedAt).toLocaleString("zh-TW")}</td>
                   <td>
                     <div class="row-actions">
+                      {application.status === "hired" && <button onClick={()=>void beginConversion(application)}>確認到職並建立員工</button>}
+                      {application.status === "onboarded" && application.employeeId === null && <button onClick={()=>void beginConversion(application)}>補建員工主檔</button>}
                       {next && <button onClick={() => void transition(application, next)}>進入{STATUS_LABEL[next]}</button>}
                       {!["onboarded", "rejected"].includes(application.status) && (
                         <button class="danger-action" onClick={() => void transition(application, "rejected")}>淘汰</button>

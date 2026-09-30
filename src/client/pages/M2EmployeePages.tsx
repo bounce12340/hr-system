@@ -1,6 +1,8 @@
 import { useEffect, useState } from "preact/hooks";
 import { api } from "../api";
 import { CertificationReminderList, expiryText } from "../components/CertificationReminderList";
+import { RoleWorkbench } from "../components/RoleWorkbench";
+import { EMPLOYEE_WORKBENCH_TARGETS, type EmployeeWorkbenchTarget } from "../../shared/workbench";
 import type {
   CertificationReminder,
   MandatoryTrainingEmployee,
@@ -10,7 +12,10 @@ import type {
 
 const LEVEL_LABEL = ["", "低", "中", "高"];
 
-export function EmployeeHome({ user }: { user: User }) {
+export function EmployeeHome({ user, onOpenTarget }: {
+  user: User;
+  onOpenTarget: (target: EmployeeWorkbenchTarget) => void;
+}) {
   const [data, setData] = useState<{
     settings: TrainingSettings;
     certificationReminders: CertificationReminder[];
@@ -34,6 +39,7 @@ export function EmployeeHome({ user }: { user: User }) {
       <div class="metric"><span>必修完成</span><strong>{data?.mandatoryTraining?.completedCount ?? 0}/{data?.mandatoryTraining?.requiredCount ?? 0}</strong></div>
       <div class="metric"><span>證照到期提醒</span><strong>{data?.certificationReminders.length ?? 0}</strong></div>
     </div>
+    <RoleWorkbench endpoint="/api/employee/workbench" allowedTargets={EMPLOYEE_WORKBENCH_TARGETS} onOpenTarget={onOpenTarget} />
     <div class="home-grid">
       <div class="panel">
         <div class="panel-heading"><div><h2>我的證照提醒</h2><small>提前 {data?.settings.certificationReminderDays ?? 60} 天顯示</small></div></div>

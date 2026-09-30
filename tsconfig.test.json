@@ -2,6 +2,8 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "lib": ["ESNext"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
     "skipLibCheck": true,
     "types": [
       "@cloudflare/workers-types",
@@ -11,6 +13,8 @@
   "include": [
     "worker-configuration.d.ts",
     "src/server",
+    "src/shared",
+    "src/client",
     "test"
   ]
 }

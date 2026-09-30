@@ -462,23 +462,22 @@ async function importAttendance(context: ApiContext): Promise<Response> {
       continue;
     }
 
-    const existing = await db.prepare(`
-      SELECT id FROM attendance WHERE employee_id = ? AND attendance_date = ? ORDER BY id LIMIT 1
-    `).bind(employee.id, dateText).first<{ id: string }>();
-
-    if (existing) {
-      await db.prepare(`
-        UPDATE attendance SET absence_hours = ?, overtime_hours = ?, absence_type = ?, source = 'csv', notes = ?
-        WHERE id = ?
-      `).bind(absenceHours, overtimeHours, absenceType || null, notes, existing.id).run();
-      summary.updated += 1;
-    } else {
-      await db.prepare(`
-        INSERT INTO attendance (id, employee_id, attendance_date, absence_hours, overtime_hours, absence_type, source, notes)
-        VALUES (?, ?, ?, ?, ?, ?, 'csv', ?)
-      `).bind(uuid(), employee.id, dateText, absenceHours, overtimeHours, absenceType || null, notes).run();
-      summary.imported += 1;
-    }
+    const id = uuid();
+    const result = await db.prepare(`
+      INSERT INTO attendance (id, employee_id, attendance_date, absence_hours, overtime_hours, absence_type, source, notes)
+      VALUES (?, ?, ?, ?, ?, ?, 'csv', ?)
+      ON CONFLICT(employee_id, attendance_date) DO UPDATE SET
+        absence_hours = excluded.absence_hours,
+        overtime_hours = excluded.overtime_hours,
+        absence_type = excluded.absence_type,
+        source = 'csv',
+        notes = excluded.notes
+      RETURNING id
+    `).bind(id, employee.id, dateText, absenceHours, overtimeHours, absenceType || null, notes)
+      .first<{ id: string }>();
+    if (!result) throw new Error("出缺勤匯入 upsert 未回傳 id。");
+    if (result.id === id) summary.imported += 1;
+    else summary.updated += 1;
   }
 
   return json(summary);
@@ -592,28 +591,33 @@ async function listAttendanceRecords(context: ApiContext): Promise<Response> {
 async function createAttendanceRecord(context: ApiContext): Promise<Response> {
   const fields = parseAttendanceRecord(await parseJson<AttendanceRecordInput>(context.request));
   await ensureEmployeeExists(context.env.DB, fields.employeeId);
-  const existing = await context.env.DB.prepare(
-    "SELECT id FROM attendance WHERE employee_id = ? AND attendance_date = ?",
-  ).bind(fields.employeeId, fields.attendanceDate).first<{ id: string }>();
-  if (existing) {
-    await context.env.DB.prepare(`
-      UPDATE attendance SET absence_hours = ?, overtime_hours = ?, absence_type = ?, source = 'manual', notes = ?
-      WHERE id = ?
-    `).bind(fields.absenceHours, fields.overtimeHours, fields.absenceType, fields.notes, existing.id).run();
-    return json({ record: await getAttendanceRecord(context.env.DB, existing.id) });
-  }
   const id = uuid();
-  await context.env.DB.prepare(`
+  const result = await context.env.DB.prepare(`
     INSERT INTO attendance (id, employee_id, attendance_date, absence_hours, overtime_hours, absence_type, source, notes)
     VALUES (?, ?, ?, ?, ?, ?, 'manual', ?)
+    ON CONFLICT(employee_id, attendance_date) DO UPDATE SET
+      absence_hours = excluded.absence_hours,
+      overtime_hours = excluded.overtime_hours,
+      absence_type = excluded.absence_type,
+      source = 'manual',
+      notes = excluded.notes
+    RETURNING id
   `).bind(
     id, fields.employeeId, fields.attendanceDate, fields.absenceHours, fields.overtimeHours,
     fields.absenceType, fields.notes,
-  ).run();
-  return json({ record: await getAttendanceRecord(context.env.DB, id) }, 201);
+  ).first<{ id: string }>();
+  if (!result) throw new Error("出缺勤手動 upsert 未回傳 id。");
+  return json({ record: await getAttendanceRecord(context.env.DB, result.id) }, result.id === id ? 201 : 200);
 }
 
-/** 更新單筆出缺勤。若異動後的員工＋日期組合與另一筆既有紀錄重複，回 409 避免產生邏輯上的重複列。 */
+function isAttendanceUniqueConflict(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return message.includes("unique constraint failed: attendance.employee_id, attendance.attendance_date")
+    || message.includes("unique constraint failed: attendance.employee_id, attendance_date");
+}
+
+/** PATCH 搬移至已占用員工日期時回 409，並保留其他資料庫錯誤。 */
 async function updateAttendanceRecord(context: ApiContext, id: string): Promise<Response> {
   const fields = parseAttendanceRecord(await parseJson<AttendanceRecordInput>(context.request));
   await ensureEmployeeExists(context.env.DB, fields.employeeId);
@@ -621,14 +625,19 @@ async function updateAttendanceRecord(context: ApiContext, id: string): Promise<
     "SELECT id FROM attendance WHERE employee_id = ? AND attendance_date = ? AND id <> ?",
   ).bind(fields.employeeId, fields.attendanceDate, id).first<{ id: string }>();
   if (conflict) throw new ApiError(409, "該員工當日已有其他出缺勤紀錄。");
-  const result = await context.env.DB.prepare(`
-    UPDATE attendance SET employee_id = ?, attendance_date = ?, absence_hours = ?, overtime_hours = ?,
-      absence_type = ?, notes = ? WHERE id = ?
-  `).bind(
-    fields.employeeId, fields.attendanceDate, fields.absenceHours, fields.overtimeHours,
-    fields.absenceType, fields.notes, id,
-  ).run();
-  if (result.meta.changes === 0) throw new ApiError(404, "找不到指定的出缺勤紀錄。");
+  try {
+    const result = await context.env.DB.prepare(`
+      UPDATE attendance SET employee_id = ?, attendance_date = ?, absence_hours = ?, overtime_hours = ?,
+        absence_type = ?, notes = ? WHERE id = ?
+    `).bind(
+      fields.employeeId, fields.attendanceDate, fields.absenceHours, fields.overtimeHours,
+      fields.absenceType, fields.notes, id,
+    ).run();
+    if (result.meta.changes === 0) throw new ApiError(404, "找不到指定的出缺勤紀錄。");
+  } catch (error) {
+    if (isAttendanceUniqueConflict(error)) throw new ApiError(409, "該員工當日已有其他出缺勤紀錄。");
+    throw error;
+  }
   return json({ record: await getAttendanceRecord(context.env.DB, id) });
 }
 

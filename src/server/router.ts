@@ -1,5 +1,6 @@
 import { handleAdminAccounts } from "./accounts";
 import { authenticate, changePassword, completeTour, login, logout } from "./auth";
+import { listDataQuality } from "./data-quality";
 import { handleAdminHealthCheck, handleEmployeeHealthCheck } from "./health";
 import {
   ApiError,
@@ -11,7 +12,9 @@ import {
 } from "./http";
 import { handleAdminM1, handleEmployeeM1 } from "./m1";
 import { handleAdminM2, handleEmployeeM2 } from "./m2";
+import { handleAdminWorkbench, handleEmployeeWorkbench } from "./workbench";
 import { handleAdminM3 } from "./m3";
+import { handleReminderNotifications } from "./reminder-notifications";
 import { handleAdminM4 } from "./m4";
 import { handleAdminM5, handleEmployeeM5 } from "./m5";
 import { handlePublicPasswordSetup } from "./password-setup";
@@ -81,14 +84,24 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     }
     if (path.startsWith("/api/admin/")) {
       requireAdmin(user);
+      if (path === "/api/admin/data-quality" && request.method === "GET") {
+        return listDataQuality(context);
+      }
+      if (path === "/api/admin/data-quality") {
+        throw new ApiError(405, "此端點只接受讀取。");
+      }
       // 帳號管理放最前面：/api/admin/users 與 /api/admin/employees/{id}/responsibilities
       // 都不與其他模組的路徑重疊，先比對可省掉後面五個模組的 match。
       const accountsResponse = await handleAdminAccounts(context, path);
       if (accountsResponse) return accountsResponse;
+      const workbenchResponse = await handleAdminWorkbench(context, path);
+      if (workbenchResponse) return workbenchResponse;
       const response = await handleAdminM1(context, path);
       if (response) return response;
       const m2Response = await handleAdminM2(context, path);
       if (m2Response) return m2Response;
+      const notificationResponse = await handleReminderNotifications(context, path);
+      if (notificationResponse) return notificationResponse;
       const m3Response = await handleAdminM3(context, path);
       if (m3Response) return m3Response;
       const m4Response = await handleAdminM4(context, path);
@@ -101,6 +114,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       if (settingsResponse) return settingsResponse;
     }
     if (path.startsWith("/api/employee/")) {
+      const workbenchResponse = await handleEmployeeWorkbench(context, path);
+      if (workbenchResponse) return workbenchResponse;
       const response = await handleEmployeeM1(context, path);
       if (response) return response;
       const m2Response = await handleEmployeeM2(context, path);

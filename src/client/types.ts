@@ -344,3 +344,15 @@ export interface EmployeeHealthChecksPayload {
   summary: HealthCheckDueEntry | null;
   healthChecks: HealthCheckRecord[];
 }
+
+/** GET /api/admin/data-quality。dueDate 固定 null，缺資料不是逾期。 */
+export interface DataQualityItem {
+  id: string;
+  entityType: "employee" | "user";
+  entityId: string;
+  field: "birth_date" | "department" | "employee_id";
+  reason: string;
+  impact: string;
+  nextAction: { tab: "employees" | "settings" };
+  dueDate: null;
+}

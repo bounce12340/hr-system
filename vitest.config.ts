@@ -1,9 +1,17 @@
 import path from "node:path";
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
+import preact from "@preact/preset-vite";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // Tests import client TSX directly; use the same automatic Preact JSX runtime
+  // as tsconfig.client.json and @preact/preset-vite's production transform.
+  esbuild: {
+    jsx: "automatic",
+    jsxImportSource: "preact",
+  },
   plugins: [
+    preact(),
     cloudflareTest(async () => {
       const migrations = await readD1Migrations(path.join(import.meta.dirname, "migrations"));
       return {
