@@ -35,14 +35,6 @@ const SOURCE_LABEL: Record<WorkbenchSource, string> = {
   certification_expiry: "證照到期",
 };
 
-const ALLOWED_TARGETS = new Set<WorkbenchTarget>([
-  "recruitment/onboarding",
-  "scheduling/attendance",
-  "health/certifications",
-  "schedule",
-  "certifications",
-]);
-
 export function RoleWorkbench<T extends WorkbenchTarget>({ endpoint, allowedTargets, onOpenTarget }: {
   endpoint: "/api/admin/workbench" | "/api/employee/workbench";
   allowedTargets: readonly T[];
