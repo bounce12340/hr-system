@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22.23.2', '24.21.0']
+        node: ['22.23.4', '24.22.1']
     env:
       CI: 'true'
       WRANGLER_SEND_METRICS: 'false'
